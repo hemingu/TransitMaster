@@ -35,17 +35,18 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build network.json (fixture data)
-        # NOTE: 現時点では ODPT_TOKEN が未取得のため、フィクスチャ（ミニGTFS）データで
-        # デプロイする。実データに切り替える手順は README.md の「実データ利用手順」を参照。
-        # トークン取得後は、リポジトリの Secrets に ODPT_TOKEN を設定した上で、
-        # このステップを次の2ステップに置き換える:
-        #   - run: npm run fetch:gtfs -- --list
-        #   - run: npm run fetch:gtfs
-        #     env:
-        #       ODPT_TOKEN: ${{ secrets.ODPT_TOKEN }}
-        #   - run: npm run build:network
-        run: npm run build:network -- --fixture
+      # ODPT の CKAN カタログから鉄道 GTFS リソースを棚卸しして manifest.json を作る
+      - name: List ODPT GTFS resources
+        run: npm run fetch:gtfs -- --list
+
+      # manifest.json の各リソースをダウンロード（要トークンのものは ODPT_TOKEN を使用）
+      - name: Fetch GTFS feeds
+        run: npm run fetch:gtfs
+        env:
+          ODPT_TOKEN: ${{ secrets.ODPT_TOKEN }}
+
+      - name: Build network.json (real data)
+        run: npm run build:network
 
       - name: Build
         run: npm run build
