@@ -90,10 +90,6 @@
   color: var(--muted);
 }
 
-.line-choice {
-  align-items: center;
-}
-
 .primary-button {
   padding: 14px 20px;
   border-radius: 10px;
@@ -215,13 +211,20 @@
 /* ---- 路線バッジ ---- */
 .line-badge {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
+  gap: 5px;
   color: #fff;
   font-size: 13px;
   font-weight: 600;
   border-radius: 6px;
   padding: 3px 8px;
   white-space: nowrap;
+}
+
+.line-badge-company {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.85;
 }
 
 /* ---- 路線/駅選択 ---- */
@@ -233,7 +236,12 @@
   padding: 12px 16px;
 }
 
-.station-search {
+/* ---- オートコンプリート入力 ---- */
+.autocomplete {
+  position: relative;
+}
+
+.autocomplete-input {
   width: 100%;
   padding: 10px 12px;
   border-radius: 8px;
@@ -241,30 +249,55 @@
   background: var(--bg);
   color: var(--text-h);
   font-size: 15px;
-  margin-bottom: 10px;
+  box-sizing: border-box;
 }
 
-.station-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 260px;
-  overflow-y: auto;
-}
-
-.station-list-item {
-  text-align: left;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text-h);
-  cursor: pointer;
-}
-
-.station-list-item:hover {
+.autocomplete-input:focus {
+  outline: none;
   border-color: var(--accent-border);
+}
+
+.autocomplete-list {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.autocomplete-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-h);
+}
+
+.autocomplete-option.highlighted {
   background: var(--accent-bg);
+}
+
+.autocomplete-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.autocomplete-empty {
+  padding: 10px;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .link-button {

@@ -1,19 +1,5 @@
-import type { AnswerMode, Network, RouteLeg } from './types.ts';
-import type { RouteEvaluation } from './validate.ts';
-import type { Itinerary } from './types.ts';
-
-/**
- * 出題時の出発時刻（9:08:00、秒）。
- *
- * tests/raptor.test.ts の DEPART_TRANSFER_FASTER と同じ値。
- * ミニダイヤ（10分間隔グリッド）では 9:00:00 ちょうど発だと、東京->新宿の
- * 丸ノ内線直通(乗換0)と丸ノ内線->中央線の乗換ルート(乗換1)が同着してしまい、
- * 「最短時間」「最小乗換」「最安運賃」の3モードで解が分かれる出題にならない。
- * 9:08:00 発にすると直通の次発(9:17:00)を1本逃すため、乗換ルートの方が
- * 先に到着するようになり、time/transfers/fare の3モードで異なる経路・指標が
- * 選ばれる出題を安定して作れる。
- */
-export const DEPART_SEC = 9 * 3600 + 8 * 60;
+import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from './types.ts';
+import { getNetworkIndex } from './networkIndex.ts';
 
 /** difficulty -> generateQuestion の乗換回数レンジ */
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -38,15 +24,6 @@ export function difficultyToTransferRange(difficulty: Difficulty): {
   }
 }
 
-/** 秒（0時からの経過秒、24時超あり）を "HH:MM" 形式に整形する */
-export function formatClock(sec: number): string {
-  const normalized = ((sec % 86400) + 86400) % 86400;
-  const h = Math.floor(normalized / 3600);
-  const m = Math.floor((normalized % 3600) / 60);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(h)}:${pad(m)}`;
-}
-
 /** 秒数を "X分" もしくは "X時間Y分" 形式に整形する */
 export function formatDuration(sec: number): string {
   const totalMinutes = Math.round(sec / 60);
@@ -58,10 +35,13 @@ export function formatDuration(sec: number): string {
   return `${m}分`;
 }
 
-/** 運賃を "X円" もしくは算出不可時は "不明" に整形する */
-export function formatFare(fare: number | null): string {
-  if (fare === null) return '不明';
-  return `${fare.toLocaleString('ja-JP')}円`;
+/**
+ * 駅間所要秒(segSec)ベースの推定所要時間を "約X分（推定）" もしくは
+ * "約X時間Y分（推定）" 形式に整形する。時刻表を廃止したため、実際の発着時刻ではなく
+ * あくまで区間所要秒の合計に基づく目安であることを明示する。
+ */
+export function formatEstimatedDuration(sec: number): string {
+  return `約${formatDuration(sec)}（推定）`;
 }
 
 /** 駅のグループ代表名（グループ内先頭に見つかった駅の name）を返す */
@@ -77,16 +57,23 @@ export function groupDisplayName(network: Network, group: number): string {
   return station ? station.name : '(不明な駅)';
 }
 
+/** 路線名を "路線名（事業者名）" の形式に整形する（例: 銀座線（東京メトロ）） */
+export function formatLineName(network: Network, lineIdx: number): string {
+  const line = network.lines[lineIdx];
+  if (!line) return '不明な路線';
+  return `${line.name}（${line.company}）`;
+}
+
 /** 指定駅（グループ）を通る路線のインデックス一覧を重複なく返す */
 export function linesThroughStation(network: Network, stationIdx: number): number[] {
   const group = network.stations[stationIdx]?.group;
   if (group === undefined) return [];
+  const index = getNetworkIndex(network);
   const result: number[] = [];
-  network.lines.forEach((line, lineIdx) => {
-    const passesGroup = line.patterns.some((pattern) =>
-      pattern.stops.some((stop) => network.stations[stop].group === group)
-    );
-    if (passesGroup) result.push(lineIdx);
+  index.lineGroups.forEach((groups, lineIdx) => {
+    if (groups.has(group)) {
+      result.push(lineIdx);
+    }
   });
   return result;
 }
@@ -124,7 +111,7 @@ export function stationsOnLine(
  * 指定駅と同一グループの駅のうち、指定路線の Pattern.stops に実際に含まれる
  * 駅 index を返す。見つからなければ null。
  *
- * Station はフィードごとに別レコードのため（例: 東京(jr) と 東京(metro) は
+ * Station は路線ごとに別レコードのため（例: 東京(山手線) と 東京(丸ノ内線) は
  * 同一グループだが別 index）、直前の路線で降りた駅 index をそのまま次の路線の
  * leg.from に使うと validateRoute が 'station-not-on-line' で落ちる。
  * leg 生成時にこのヘルパーで路線上の駅 index へマップして吸収する。
@@ -139,9 +126,13 @@ export function stationOnLineInGroup(
   if (!line || !station) return null;
 
   const group = station.group;
+  const index = getNetworkIndex(network);
+  const members = index.groupMembers.get(group) ?? [stationIdx];
+  const memberSet = new Set(members);
+
   for (const pattern of line.patterns) {
     for (const stopIdx of pattern.stops) {
-      if (network.stations[stopIdx].group === group) {
+      if (memberSet.has(stopIdx)) {
         return stopIdx;
       }
     }
@@ -185,7 +176,7 @@ export function reasonMessage(
 ): string {
   if (reason === undefined) return '';
   const leg = legIndex !== undefined ? legs[legIndex] : undefined;
-  const lineName = leg ? (network.lines[leg.line]?.name ?? '不明な路線') : '不明な路線';
+  const lineName = leg ? formatLineName(network, leg.line) : '不明な路線';
   const fromName = leg ? stationDisplayName(network, leg.from) : '';
   const toName = leg ? stationDisplayName(network, leg.to) : '';
 
@@ -222,22 +213,15 @@ export interface Judgement {
  *
  * パーフェクト条件:
  * - mode='transfers': ユーザーの乗換回数 <= 模範解答の乗換回数
- * - mode='fare'      : ユーザーの運賃 <= 模範解答の運賃（両者とも算出可能な場合のみ判定。
- *                       ユーザーのfareがnullならパーフェクトにはならない）
- * - mode='time'      : ユーザーの所要時間 <= 模範解答の所要時間 * 1.1（±10%以内）
+ * - mode='time'      : ユーザーの総所要秒 <= 模範解答の総所要秒 * 1.1（±10%以内）
  *   上記を満たさない場合は「正解（模範解答は○○）」の good 判定。
  *
- * 所要時間の基準統一（timeモード）:
- * ユーザー側の evaluateRoute.durationSec は departSec（出題の出発時刻）起点＝初回の
- * 列車待ち時間込み。一方 Itinerary.depart は実際の乗車時刻のため、
- * arrive - depart で比較すると基準がずれて同一経路でもパーフェクトを逃しうる。
- * そこで模範解答側も arrive - departSec（初回待ち込み）で所要時間を計算して比較する。
+ * 模範解答が見つからない（reference === null）場合は比較のしようがないため good 判定にする。
  */
 export function judgeAnswer(
   mode: AnswerMode,
   evaluation: RouteEvaluation,
-  reference: Itinerary | null,
-  departSec: number = DEPART_SEC
+  reference: Itinerary | null
 ): Judgement {
   if (reference === null) {
     // 模範解答が無い（探索不能）場合は比較のしようがないため正解扱いとする
@@ -254,44 +238,28 @@ export function judgeAnswer(
         };
   }
 
-  if (mode === 'fare') {
-    if (evaluation.fare === null) {
-      return { level: 'good', message: `正解！（模範解答は${formatFare(reference.fare)}でした）` };
-    }
-    const refFare = reference.fare;
-    const isPerfect = refFare !== null && evaluation.fare <= refFare;
-    return isPerfect
-      ? { level: 'perfect', message: 'パーフェクト！（模範解答と同じかそれ以下の運賃です）' }
-      : {
-          level: 'good',
-          message: `正解！（模範解答は${formatFare(reference.fare)}でした）`,
-        };
-  }
-
   // mode === 'time'
-  // 両者とも departSec 起点（初回の列車待ち込み）の所要時間で比較する
-  const refDuration = reference.arrive - departSec;
-  if (evaluation.durationSec === null) {
+  if (evaluation.totalSec === null) {
     return {
       level: 'good',
-      message: `正解！（模範解答は${formatDuration(refDuration)}でした）`,
+      message: `正解！（模範解答は${formatEstimatedDuration(reference.totalSec)}でした）`,
     };
   }
-  const isPerfect = evaluation.durationSec <= refDuration * 1.1;
+  const isPerfect = evaluation.totalSec <= reference.totalSec * 1.1;
   return isPerfect
     ? { level: 'perfect', message: 'パーフェクト！（模範解答とほぼ同じ所要時間です）' }
     : {
         level: 'good',
-        message: `正解！（模範解答は${formatDuration(refDuration)}でした）`,
+        message: `正解！（模範解答は${formatEstimatedDuration(reference.totalSec)}でした）`,
       };
 }
 
-/** 組み立て中の経路を表示用文字列に変換する（例: "山手線 東京→上野 ｜ 丸ノ内線 上野→新宿"） */
+/** 組み立て中の経路を表示用文字列に変換する（例: "山手線（JR東日本） 東京→上野 ｜ 丸ノ内線（東京メトロ） 上野→新宿"） */
 export function formatRouteLegs(network: Network, legs: RouteLeg[]): string {
   if (legs.length === 0) return '（まだ経路がありません）';
   return legs
     .map((leg) => {
-      const lineName = network.lines[leg.line]?.name ?? '不明な路線';
+      const lineName = formatLineName(network, leg.line);
       const fromName = stationDisplayName(network, leg.from);
       const toName = stationDisplayName(network, leg.to);
       return `${lineName} ${fromName}→${toName}`;

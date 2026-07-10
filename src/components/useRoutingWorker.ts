@@ -54,12 +54,7 @@ export function useRoutingWorker(network: Network | null) {
     };
   }, [network]);
 
-  const search = (
-    from: number,
-    to: number,
-    departSec: number,
-    mode: AnswerMode
-  ): Promise<Itinerary | null> => {
+  const search = (from: number, to: number, mode: AnswerMode): Promise<Itinerary | null> => {
     return new Promise((resolve) => {
       const worker = workerRef.current;
       if (!worker) {
@@ -73,7 +68,6 @@ export function useRoutingWorker(network: Network | null) {
         requestId,
         from,
         to,
-        departSec,
         mode,
       };
       worker.postMessage(msg);

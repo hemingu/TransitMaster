@@ -1,14 +1,16 @@
 /// <reference lib="webworker" />
+import { getNetworkIndex } from '../lib/networkIndex.ts';
 import { searchRoute } from '../lib/raptor.ts';
 import type { AnswerMode, Itinerary, Network } from '../lib/types.ts';
 
 /**
  * routing.worker: UIスレッドから Network を一度だけ受け取り（init）、
  * 以後は探索リクエスト（search）を受けて searchRoute を実行し結果を返す。
+ * 時刻の概念は廃止（駅間所要秒ベース）のため、search メッセージに departSec は含まない。
  *
  * メッセージプロトコル:
  * - 受信 { type: 'init', network: Network }
- * - 受信 { type: 'search', requestId: number, from: number, to: number, departSec: number, mode: AnswerMode }
+ * - 受信 { type: 'search', requestId: number, from: number, to: number, mode: AnswerMode }
  * - 送信 { type: 'result', requestId: number, itinerary: Itinerary | null }
  * - 送信 { type: 'error', requestId?: number, message: string }
  */
@@ -23,7 +25,6 @@ export interface WorkerSearchMessage {
   requestId: number;
   from: number;
   to: number;
-  departSec: number;
   mode: AnswerMode;
 }
 
@@ -50,6 +51,8 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
 
   if (data.type === 'init') {
     network = data.network;
+    // 探索リクエストの初回レイテンシを避けるため、init時点でインデックスを先行構築しておく。
+    getNetworkIndex(network);
     return;
   }
 
@@ -64,7 +67,7 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
       return;
     }
     try {
-      const itinerary = searchRoute(network, data.from, data.to, data.departSec, data.mode);
+      const itinerary = searchRoute(network, data.from, data.to, data.mode);
       const resultMsg: WorkerResultMessage = {
         type: 'result',
         requestId: data.requestId,

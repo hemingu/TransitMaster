@@ -1,10 +1,10 @@
 /**
- * 最小限の CSV / GTFS 時刻ユーティリティ。
+ * 最小限の CSV パースユーティリティ。
  * fs には依存しないので、テストやブラウザ非依存の文脈からもそのまま呼べる。
  */
 
 /**
- * GTFS の CSV テキストをパースしてレコードの配列にする。
+ * CSV テキストをパースしてレコードの配列にする（駅データ.jp CSV / GTFS CSV 共通で使う）。
  * - 先頭の BOM を除去
  * - CRLF / LF どちらの改行にも対応
  * - ダブルクオートで囲まれたフィールド（カンマ・改行・"" エスケープを含む）に対応
@@ -103,17 +103,4 @@ export function parseCsv(text: string): Record<string, string>[] {
     records.push(rec);
   }
   return records;
-}
-
-/**
- * GTFS の "HH:MM:SS" 形式の時刻文字列を、0時からの経過秒数に変換する。
- * HH は 24 以上（深夜運行を翌日扱いにする GTFS の慣習）になり得る。
- */
-export function parseGtfsTime(time: string): number {
-  const parts = time.trim().split(':');
-  if (parts.length !== 3) {
-    throw new Error(`invalid GTFS time: ${time}`);
-  }
-  const [h, m, s] = parts.map((p) => parseInt(p, 10));
-  return h * 3600 + m * 60 + s;
 }

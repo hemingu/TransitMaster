@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildNetwork } from '../scripts/buildNetwork.ts';
-import { miniGtfsFeeds } from './fixtures/miniGtfs.ts';
 import { generateQuestion } from '../src/lib/question.ts';
+import { miniNetwork } from './fixtures/miniEkidata.ts';
 import type { Network } from '../src/lib/types.ts';
 
 /** 決定的な rng: 与えた値を順番に返し、末尾に達したら先頭に戻る */
@@ -26,64 +25,72 @@ function rngTargeting(areaStations: number[], originStation: number, destStation
   return makeSeededRng([originR, destR]);
 }
 
-describe('generateQuestion', () => {
-  const { network } = buildNetwork(miniGtfsFeeds());
+function stationOnLine(network: Network, lineName: string, name: string): number {
+  const line = network.lines.find((l) => l.name === lineName);
+  if (!line) throw new Error(`line not found: ${lineName}`);
+  for (const pattern of line.patterns) {
+    for (const stopIdx of pattern.stops) {
+      if (network.stations[stopIdx].name === name) return stopIdx;
+    }
+  }
+  throw new Error(`station ${name} not found on line ${lineName}`);
+}
+
+describe('generateQuestion (miniNetwork)', () => {
+  const network = miniNetwork();
   const allStations = network.stations.map((_, i) => i);
 
-  function findStationIndex(name: string, feed: string): number {
-    const idx = network.stations.findIndex((s) => s.name === name && s.feed === feed);
-    if (idx === -1) throw new Error(`station not found: ${name} (${feed})`);
-    return idx;
-  }
-
-  it('上野→新宿(jr) の問題は minTransfers=1 になる', () => {
-    const ueno = findStationIndex('上野', 'jr');
-    const shinjukuJr = findStationIndex('新宿', 'jr');
-    const rng = rngTargeting(allStations, ueno, shinjukuJr);
+  it('上野→新宿(山手線) の問題は minTransfers=1 になる', () => {
+    // 山手線のみで到達可能な上野からは、新宿(山手線)へ直通(乗換0)できてしまうため、
+    // 乗換1回が最小になるペアとして「上野(山手線)→新宿(中央線専用駅)」を使う代わりに、
+    // ここでは中央線・丸ノ内線に乗り換えないと到達できない駅ペアを使う:
+    // 上野は山手線のみ、大手町は丸ノ内線のみなので乗換1回が最小。
+    const ueno = stationOnLine(network, '山手線', '上野');
+    const otemachi = stationOnLine(network, '丸ノ内線', '大手町');
+    const rng = rngTargeting(allStations, ueno, otemachi);
 
     const q = generateQuestion(network, allStations, { rng });
     expect(q).not.toBeNull();
     expect(q!.origin).toBe(ueno);
-    expect(q!.destination).toBe(shinjukuJr);
+    expect(q!.destination).toBe(otemachi);
     expect(q!.minTransfers).toBe(1);
   });
 
-  it('同一グループの駅ペアは返さない（東京jr/東京metroを狙っても再抽選される）', () => {
-    const tokyoJr = findStationIndex('東京', 'jr');
-    const tokyoMetro = findStationIndex('東京', 'metro');
-    // 最初に同一グループの東京jr/東京metroを引かせ、以降はUeno/Shinjuku(jr)を引かせて
+  it('同一グループの駅ペアは返さない（東京の山手線/丸ノ内線レコードを狙っても再抽選される）', () => {
+    const tokyoYamanote = stationOnLine(network, '山手線', '東京');
+    const tokyoMarunouchi = stationOnLine(network, '丸ノ内線', '東京');
+    // 最初に同一グループの東京(山手線)/東京(丸ノ内線)を引かせ、以降は上野/大手町を引かせて
     // 「同一グループはスキップされ、次の候補で成立する」ことを確認する。
-    const ueno = findStationIndex('上野', 'jr');
-    const shinjukuJr = findStationIndex('新宿', 'jr');
+    const ueno = stationOnLine(network, '山手線', '上野');
+    const otemachi = stationOnLine(network, '丸ノ内線', '大手町');
     const len = allStations.length;
-    const tokyoJrPos = allStations.indexOf(tokyoJr);
-    const tokyoMetroPos = allStations.indexOf(tokyoMetro);
-    const tokyoJrR = (tokyoJrPos + 0.001) / len;
-    const tokyoMetroBase = tokyoMetroPos > tokyoJrPos ? tokyoMetroPos - 1 : tokyoMetroPos;
-    const tokyoMetroR = (tokyoMetroBase + 0.001) / (len - 1);
+
+    const tokyoYamanotePos = allStations.indexOf(tokyoYamanote);
+    const tokyoMarunouchiPos = allStations.indexOf(tokyoMarunouchi);
+    const tokyoYamanoteR = (tokyoYamanotePos + 0.001) / len;
+    const tokyoMarunouchiBase =
+      tokyoMarunouchiPos > tokyoYamanotePos ? tokyoMarunouchiPos - 1 : tokyoMarunouchiPos;
+    const tokyoMarunouchiR = (tokyoMarunouchiBase + 0.001) / (len - 1);
 
     const uenoPos = allStations.indexOf(ueno);
-    const shinjukuPos = allStations.indexOf(shinjukuJr);
+    const otemachiPos = allStations.indexOf(otemachi);
     const uenoR = (uenoPos + 0.001) / len;
-    const shinjukuBase = shinjukuPos > uenoPos ? shinjukuPos - 1 : shinjukuPos;
-    const shinjukuR = (shinjukuBase + 0.001) / (len - 1);
+    const otemachiBase = otemachiPos > uenoPos ? otemachiPos - 1 : otemachiPos;
+    const otemachiR = (otemachiBase + 0.001) / (len - 1);
 
-    const rng = makeSeededRng([tokyoJrR, tokyoMetroR, uenoR, shinjukuR]);
+    const rng = makeSeededRng([tokyoYamanoteR, tokyoMarunouchiR, uenoR, otemachiR]);
     const q = generateQuestion(network, allStations, { rng });
 
     expect(q).not.toBeNull();
     expect(network.stations[q!.origin].group).not.toBe(network.stations[q!.destination].group);
-    // 同一グループはスキップされ、Ueno/Shinjuku(jr) の組み合わせに落ち着くはず
     expect(q!.origin).toBe(ueno);
-    expect(q!.destination).toBe(shinjukuJr);
+    expect(q!.destination).toBe(otemachi);
   });
 
   it('デフォルトでは minTransfers>=1 の問題のみ返す', () => {
-    // Math.random 相当のランダムなrngで多数回試行し、常にminTransfers>=1であることを確認
     let calls = 0;
     const rng = () => {
       calls++;
-      // 疑似ランダム風の値を生成（0以上1未満）
       const x = Math.sin(calls * 999.123) * 10000;
       return x - Math.floor(x);
     };
@@ -97,15 +104,15 @@ describe('generateQuestion', () => {
     }
   });
 
-  it('全駅ペアが直通のみの部分集合を渡すと null を返す', () => {
-    // 山手線内の駅のみ（東京jr・神田・秋葉原・上野・池袋jr）はすべて同一路線で直通可能（乗換0）。
+  it('全駅ペアが直通のみの部分集合を渡すと null を返す（山手線内のみ）', () => {
+    // 山手線内の駅のみはすべて同一路線で直通可能（乗換0）。
     // minTransfers>=1 をデフォルトのまま要求すると、どのペアも条件を満たせず null になるはず。
     const yamanoteOnly = [
-      findStationIndex('東京', 'jr'),
-      findStationIndex('神田', 'jr'),
-      findStationIndex('秋葉原', 'jr'),
-      findStationIndex('上野', 'jr'),
-      findStationIndex('池袋', 'jr'),
+      stationOnLine(network, '山手線', '東京'),
+      stationOnLine(network, '山手線', '神田'),
+      stationOnLine(network, '山手線', '秋葉原'),
+      stationOnLine(network, '山手線', '上野'),
+      stationOnLine(network, '山手線', '池袋'),
     ];
     const rng = makeSeededRng([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.05]);
     const q = generateQuestion(network, yamanoteOnly, { rng });
@@ -113,7 +120,7 @@ describe('generateQuestion', () => {
   });
 
   it('areaStations が2駅未満なら null を返す', () => {
-    const onlyOne = [findStationIndex('東京', 'jr')];
+    const onlyOne = [stationOnLine(network, '山手線', '東京')];
     const q = generateQuestion(network, onlyOne, {});
     expect(q).toBeNull();
   });
@@ -137,5 +144,20 @@ describe('generateQuestion', () => {
     const q = generateQuestion(network, allStations);
     expect(q).not.toBeNull();
     expect(q!.minTransfers).toBeGreaterThanOrEqual(1);
+  });
+
+  it('到達不能ペア: テスト電鉄本線は他路線と接続していないため孤立集合として扱われる場合はnull', () => {
+    // テスト電鉄本線の駅のみを areaStations にすると、本村は分岐のハブだが全て同一路線で
+    // 直通可能（乗換0）になるため、minTransfers>=1を満たせずnullになる。
+    const testTetsuOnly = [
+      stationOnLine(network, 'テスト電鉄本線', '新宿'),
+      stationOnLine(network, 'テスト電鉄本線', '初台'),
+      stationOnLine(network, 'テスト電鉄本線', '本村'),
+      stationOnLine(network, 'テスト電鉄本線', '東山'),
+      stationOnLine(network, 'テスト電鉄本線', '西丘'),
+    ];
+    const rng = makeSeededRng([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.05]);
+    const q = generateQuestion(network, testTetsuOnly, { rng });
+    expect(q).toBeNull();
   });
 });

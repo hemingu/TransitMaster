@@ -7,15 +7,14 @@ import { ResultScreen } from './components/ResultScreen.tsx';
 import { useRoutingWorker } from './components/useRoutingWorker.ts';
 import { type AreaId, stationsInArea } from './lib/area.ts';
 import {
-  DEPART_SEC,
   type Difficulty,
   type Judgement,
   difficultyToTransferRange,
   judgeAnswer,
 } from './lib/game.ts';
 import { generateQuestion } from './lib/question.ts';
-import { evaluateRoute, validateRoute, type RouteEvaluation } from './lib/validate.ts';
-import type { AnswerMode, Itinerary, Network, RouteLeg } from './lib/types.ts';
+import { evaluateRoute, validateRoute } from './lib/validate.ts';
+import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from './lib/types.ts';
 
 type Screen = 'loading' | 'setup' | 'building' | 'result';
 
@@ -66,8 +65,14 @@ function App() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
-      .then((data: Network) => {
+      .then((data: Network & { formatVersion?: number }) => {
         if (cancelled) return;
+        if (data.formatVersion !== 2) {
+          setLoadError(
+            'network.json の形式が古いです。npm run build:network を実行してください。'
+          );
+          return;
+        }
         setNetwork(data);
         setScreen('setup');
       })
@@ -93,11 +98,6 @@ function App() {
       counts[id] = stationsInArea(network, id).length;
     }
     return counts;
-  }, [network]);
-
-  const fareAvailable = useMemo(() => {
-    if (!network) return false;
-    return network.feeds.length > 0 && network.feeds.every((f) => f.fareAvailable);
   }, [network]);
 
   function startQuestion() {
@@ -158,7 +158,7 @@ function App() {
       return;
     }
 
-    const evaluation = evaluateRoute(network, legs, DEPART_SEC);
+    const evaluation = evaluateRoute(network, legs);
     setAnswerResult({ valid: true, evaluation });
     setTotalAnswered((n) => n + 1);
     setTotalCorrect((n) => n + 1);
@@ -168,9 +168,9 @@ function App() {
     setReferenceLoading(true);
     setReference(null);
     setJudgement(null);
-    const itinerary = await search(question.origin, question.destination, DEPART_SEC, mode);
+    const itinerary = await search(question.origin, question.destination, mode);
     setReference(itinerary);
-    setJudgement(judgeAnswer(mode, evaluation, itinerary, DEPART_SEC));
+    setJudgement(judgeAnswer(mode, evaluation, itinerary));
     setReferenceLoading(false);
   }
 
@@ -187,7 +187,6 @@ function App() {
       <SetupScreen
         network={network}
         areaStationCounts={areaStationCounts}
-        fareAvailable={fareAvailable}
         area={area}
         onAreaChange={setArea}
         mode={mode}
@@ -206,7 +205,6 @@ function App() {
         network={network}
         origin={question.origin}
         destination={question.destination}
-        departSec={DEPART_SEC}
         streak={streak}
         totalCorrect={totalCorrect}
         totalAnswered={totalAnswered}
@@ -225,7 +223,6 @@ function App() {
       <ResultScreen
         network={network}
         mode={mode}
-        departSec={DEPART_SEC}
         legs={legs}
         streak={streak}
         totalCorrect={totalCorrect}

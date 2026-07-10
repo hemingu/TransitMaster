@@ -3,21 +3,19 @@ import { DIFFICULTY_LABELS, type Difficulty } from '../lib/game.ts';
 import type { AnswerMode, Network } from '../lib/types.ts';
 
 const ANSWER_MODE_LABELS: Record<AnswerMode, string> = {
-  time: '最短時間',
+  time: '最短時間（推定）',
   transfers: '最小乗換',
-  fare: '最安運賃',
 };
 
 const AREA_ORDER: AreaId[] = ['tokyo23', 'tokyo', 'nagoya', 'osaka', 'japan'];
 const DIFFICULTY_ORDER: Difficulty[] = ['easy', 'normal', 'hard'];
-const ANSWER_MODE_ORDER: AnswerMode[] = ['time', 'transfers', 'fare'];
+const ANSWER_MODE_ORDER: AnswerMode[] = ['time', 'transfers'];
 
 const MIN_STATIONS_FOR_AREA = 10;
 
 interface SetupScreenProps {
   network: Network;
   areaStationCounts: Record<AreaId, number>;
-  fareAvailable: boolean;
   area: AreaId;
   onAreaChange: (area: AreaId) => void;
   mode: AnswerMode;
@@ -30,7 +28,6 @@ interface SetupScreenProps {
 
 export function SetupScreen({
   areaStationCounts,
-  fareAvailable,
   area,
   onAreaChange,
   mode,
@@ -71,22 +68,21 @@ export function SetupScreen({
       <section className="setup-group">
         <h2>模範解答モード</h2>
         <div className="choice-grid">
-          {ANSWER_MODE_ORDER.map((id) => {
-            const disabled = id === 'fare' && !fareAvailable;
-            return (
-              <button
-                key={id}
-                type="button"
-                className={`choice-button${mode === id ? ' selected' : ''}`}
-                disabled={disabled}
-                aria-pressed={mode === id}
-                onClick={() => onModeChange(id)}
-              >
-                <span>{ANSWER_MODE_LABELS[id]}</span>
-                {disabled && <span className="choice-note">運賃データ未収録</span>}
-              </button>
-            );
-          })}
+          {ANSWER_MODE_ORDER.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={`choice-button${mode === id ? ' selected' : ''}`}
+              aria-pressed={mode === id}
+              onClick={() => onModeChange(id)}
+            >
+              <span>{ANSWER_MODE_LABELS[id]}</span>
+            </button>
+          ))}
+          <button type="button" className="choice-button" disabled aria-pressed={false}>
+            <span>最安運賃</span>
+            <span className="choice-note">データ未対応</span>
+          </button>
         </div>
       </section>
 

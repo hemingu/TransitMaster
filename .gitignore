@@ -23,7 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 
-# GTFS data and generated network build output
-/data/gtfs/*.zip
-/data/gtfs/manifest.json
-/public/data/network.json
+# 旧GTFSパイプラインのデータ（廃止済みだが手元のzip実データは残す運用のため丸ごと除外）
+/data/gtfs/
+
+# 駅データ.jp CSV・国土数値情報N02データ（ユーザーが手元に配置するローカルデータ）
+/data/ekidata/
+/data/n02/

@@ -1,18 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { buildNetwork } from '../scripts/buildNetwork.ts';
-import { searchRoute } from '../src/lib/raptor.ts';
 import { evaluateRoute, validateRoute } from '../src/lib/validate.ts';
-import { miniGtfsFeeds } from './fixtures/miniGtfs.ts';
-import type { Network, RouteLeg } from '../src/lib/types.ts';
+import { miniNetwork } from './fixtures/miniEkidata.ts';
+import type { Itinerary, Network, RouteLeg } from '../src/lib/types.ts';
 import {
-  DEPART_SEC,
   buildLeg,
   difficultyToTransferRange,
   filterStationsByQuery,
-  formatClock,
   formatDuration,
-  formatFare,
+  formatEstimatedDuration,
   formatItinerary,
+  formatLineName,
   formatRouteLegs,
   groupDisplayName,
   judgeAnswer,
@@ -23,31 +20,21 @@ import {
   stationsOnLine,
 } from '../src/lib/game.ts';
 
-function findStationIndex(network: Network, name: string, feed: string): number {
-  const idx = network.stations.findIndex((s) => s.name === name && s.feed === feed);
-  if (idx === -1) throw new Error(`station not found: ${name} (${feed})`);
+function findLineIndex(network: Network, name: string): number {
+  const idx = network.lines.findIndex((l) => l.name === name);
+  if (idx === -1) throw new Error(`line not found: ${name}`);
   return idx;
 }
 
-function findLineIndex(network: Network, name: string, feed: string): number {
-  const idx = network.lines.findIndex((l) => l.name === name && l.feed === feed);
-  if (idx === -1) throw new Error(`line not found: ${name} (${feed})`);
-  return idx;
+function stationOnLine(network: Network, lineIdx: number, name: string): number {
+  const line = network.lines[lineIdx];
+  for (const pattern of line.patterns) {
+    for (const stopIdx of pattern.stops) {
+      if (network.stations[stopIdx].name === name) return stopIdx;
+    }
+  }
+  throw new Error(`station ${name} not found on line ${lineIdx}`);
 }
-
-describe('formatClock', () => {
-  it('9:08:00 (32880秒) を "09:08" に整形する', () => {
-    expect(formatClock(DEPART_SEC)).toBe('09:08');
-  });
-
-  it('0秒を "00:00" に整形する', () => {
-    expect(formatClock(0)).toBe('00:00');
-  });
-
-  it('24時を超える秒（26:30 = 25*3600+30*60）を "01:30" に整形する（24hラップ）', () => {
-    expect(formatClock(25 * 3600 + 30 * 60)).toBe('01:30');
-  });
-});
 
 describe('formatDuration', () => {
   it('分未満切り捨てではなく丸めで "X分" を返す', () => {
@@ -63,13 +50,17 @@ describe('formatDuration', () => {
   });
 });
 
-describe('formatFare', () => {
-  it('数値は "X円" に整形する', () => {
-    expect(formatFare(200)).toBe('200円');
+describe('formatEstimatedDuration', () => {
+  it('59分は「約59分（推定）」になる（60分未満の境界）', () => {
+    expect(formatEstimatedDuration(59 * 60)).toBe('約59分（推定）');
   });
 
-  it('nullは "不明" になる', () => {
-    expect(formatFare(null)).toBe('不明');
+  it('60分ちょうどは「約1時間（推定）」になる（60分の境界）', () => {
+    expect(formatEstimatedDuration(60 * 60)).toBe('約1時間（推定）');
+  });
+
+  it('60分超（65分）は「約1時間5分（推定）」になる', () => {
+    expect(formatEstimatedDuration(65 * 60)).toBe('約1時間5分（推定）');
   });
 });
 
@@ -87,36 +78,44 @@ describe('difficultyToTransferRange', () => {
   });
 });
 
-describe('game.ts helpers with mini network', () => {
-  const { network } = buildNetwork(miniGtfsFeeds());
+describe('game.ts helpers with miniNetwork', () => {
+  const network = miniNetwork();
 
-  const tokyoJr = findStationIndex(network, '東京', 'jr');
-  const tokyoMetro = findStationIndex(network, '東京', 'metro');
-  const shinjukuJr = findStationIndex(network, '新宿', 'jr');
-  const shinjukuMetro = findStationIndex(network, '新宿', 'metro');
-  const ikebukuroJr = findStationIndex(network, '池袋', 'jr');
-  const kandaJr = findStationIndex(network, '神田', 'jr');
+  const yamanote = findLineIndex(network, '山手線');
+  const chuo = findLineIndex(network, '中央線');
+  const marunouchi = findLineIndex(network, '丸ノ内線');
 
-  const yamanote = findLineIndex(network, '山手線', 'jr');
-  const marunouchi = findLineIndex(network, '丸ノ内線', 'metro');
+  const tokyoYamanote = stationOnLine(network, yamanote, '東京');
+  const tokyoMarunouchi = stationOnLine(network, marunouchi, '東京');
+  const shinjukuYamanote = stationOnLine(network, yamanote, '新宿');
+  const shinjukuMarunouchi = stationOnLine(network, marunouchi, '新宿');
+  const shinjukuChuo = stationOnLine(network, chuo, '新宿');
+  const ikebukuroYamanote = stationOnLine(network, yamanote, '池袋');
+  const kandaYamanote = stationOnLine(network, yamanote, '神田');
+  const akihabaraYamanote = stationOnLine(network, yamanote, '秋葉原');
 
   it('stationDisplayName は駅名をそのまま返す', () => {
-    expect(stationDisplayName(network, tokyoJr)).toBe('東京');
+    expect(stationDisplayName(network, tokyoYamanote)).toBe('東京');
   });
 
   it('groupDisplayName はグループ内代表駅の名前を返す', () => {
-    const group = network.stations[tokyoJr].group;
+    const group = network.stations[tokyoYamanote].group;
     expect(groupDisplayName(network, group)).toBe('東京');
   });
 
+  it('formatLineName: 路線名（事業者名）の形式になる', () => {
+    expect(formatLineName(network, marunouchi)).toBe('丸ノ内線（東京メトロ）');
+    expect(formatLineName(network, yamanote)).toBe('山手線（JR東日本）');
+  });
+
   it('linesThroughStation: 東京駅グループを通る路線には山手線と丸ノ内線が含まれる', () => {
-    const lines = linesThroughStation(network, tokyoJr).map((i) => network.lines[i].name);
+    const lines = linesThroughStation(network, tokyoYamanote).map((i) => network.lines[i].name);
     expect(lines).toContain('山手線');
     expect(lines).toContain('丸ノ内線');
   });
 
   it('stationsOnLine: 山手線上の駅一覧から現在駅（東京）を除外できる', () => {
-    const excludeGroup = network.stations[tokyoJr].group;
+    const excludeGroup = network.stations[tokyoYamanote].group;
     const stations = stationsOnLine(network, yamanote, excludeGroup);
     const names = stations.map((s) => s.name);
     expect(names).not.toContain('東京');
@@ -135,33 +134,31 @@ describe('game.ts helpers with mini network', () => {
     expect(filterStationsByQuery(stations, '')).toHaveLength(stations.length);
   });
 
-  describe('stationOnLineInGroup / buildLeg（フィード跨ぎの駅indexマッピング）', () => {
-    it('東京(jr) を丸ノ内線上の駅 index にマップすると 東京(metro) になる', () => {
-      expect(stationOnLineInGroup(network, marunouchi, tokyoJr)).toBe(tokyoMetro);
+  describe('stationOnLineInGroup / buildLeg（路線レコード跨ぎの駅indexマッピング）', () => {
+    it('東京(山手線) を丸ノ内線上の駅 index にマップすると 東京(丸ノ内線) になる', () => {
+      expect(stationOnLineInGroup(network, marunouchi, tokyoYamanote)).toBe(tokyoMarunouchi);
     });
 
     it('路線上に存在しないグループの駅は null を返す（神田は丸ノ内線に無い）', () => {
-      expect(stationOnLineInGroup(network, marunouchi, kandaJr)).toBeNull();
+      expect(stationOnLineInGroup(network, marunouchi, kandaYamanote)).toBeNull();
     });
 
-    it('回帰: 山手線 秋葉原→東京(jr) の後に丸ノ内線を選んで新宿まで乗ると valid になる', () => {
-      const akihabaraJr = findStationIndex(network, '秋葉原', 'jr');
-
+    it('回帰: 山手線 東京→(降車後)丸ノ内線に乗る際、丸ノ内線上の東京レコードへマップされる', () => {
       // UI操作の再現: 出題「秋葉原→新宿」
       // 1本目: 山手線を選択し、降車駅リスト（山手線上の駅）から東京を選ぶ
       const yamanoteCandidates = stationsOnLine(
         network,
         yamanote,
-        network.stations[akihabaraJr].group
+        network.stations[akihabaraYamanote].group
       );
       const tokyoOnYamanote = yamanoteCandidates.find((s) => s.name === '東京')!;
       expect(tokyoOnYamanote).toBeDefined();
-      const leg1 = buildLeg(network, yamanote, akihabaraJr, tokyoOnYamanote.stationIdx);
+      const leg1 = buildLeg(network, yamanote, akihabaraYamanote, tokyoOnYamanote.stationIdx);
       expect(leg1).not.toBeNull();
 
-      // 現在駅は 東京(jr) の index。ここで丸ノ内線（metroフィード）を選択して新宿へ。
+      // 現在駅は 東京(山手線) の index。ここで丸ノ内線を選択して新宿へ。
       const currentStation = leg1!.to;
-      expect(network.stations[currentStation].feed).toBe('jr');
+      expect(currentStation).toBe(tokyoYamanote);
       const marunouchiCandidates = stationsOnLine(
         network,
         marunouchi,
@@ -172,25 +169,25 @@ describe('game.ts helpers with mini network', () => {
       const leg2 = buildLeg(network, marunouchi, currentStation, shinjukuOnMarunouchi.stationIdx);
       expect(leg2).not.toBeNull();
 
-      // buildLeg が from を丸ノ内線上の 東京(metro) にマップしていること
-      expect(leg2!.from).toBe(tokyoMetro);
+      // buildLeg が from を丸ノ内線上の 東京(丸ノ内線) にマップしていること
+      expect(leg2!.from).toBe(tokyoMarunouchi);
 
       // 経路全体が valid と判定されること（修正前は 'station-not-on-line' で落ちていた）
-      const validation = validateRoute(network, akihabaraJr, shinjukuJr, [leg1!, leg2!]);
+      const validation = validateRoute(network, akihabaraYamanote, shinjukuYamanote, [leg1!, leg2!]);
       expect(validation).toEqual({ valid: true });
     });
   });
 
   describe('reasonMessage', () => {
-    it('station-not-on-line: 具体的な駅名と路線名を含む', () => {
-      const legs: RouteLeg[] = [{ line: yamanote, from: tokyoJr, to: shinjukuJr }];
+    it('station-not-on-line: 具体的な駅名と路線名（事業者名込み）を含む', () => {
+      const legs: RouteLeg[] = [{ line: yamanote, from: tokyoYamanote, to: shinjukuChuo }];
       const msg = reasonMessage(network, legs, 'station-not-on-line', 0);
       expect(msg).toContain('新宿');
-      expect(msg).toContain('山手線');
+      expect(msg).toContain('山手線（JR東日本）');
     });
 
     it('wrong-origin: 出発駅の食い違いを説明する', () => {
-      const legs: RouteLeg[] = [{ line: yamanote, from: kandaJr, to: ikebukuroJr }];
+      const legs: RouteLeg[] = [{ line: yamanote, from: kandaYamanote, to: ikebukuroYamanote }];
       const msg = reasonMessage(network, legs, 'wrong-origin', 0);
       expect(msg).toContain('神田');
     });
@@ -201,13 +198,15 @@ describe('game.ts helpers with mini network', () => {
   });
 
   describe('formatRouteLegs / formatItinerary', () => {
-    it('legsを路線名と駅名で連結した文字列にする', () => {
+    it('legsを路線名（事業者名込み）と駅名で連結した文字列にする', () => {
       const legs: RouteLeg[] = [
-        { line: yamanote, from: tokyoJr, to: kandaJr },
-        { line: marunouchi, from: kandaJr, to: shinjukuJr },
+        { line: yamanote, from: tokyoYamanote, to: kandaYamanote },
+        { line: marunouchi, from: tokyoMarunouchi, to: shinjukuMarunouchi },
       ];
       const text = formatRouteLegs(network, legs);
-      expect(text).toBe('山手線 東京→神田 ｜ 丸ノ内線 神田→新宿');
+      expect(text).toBe(
+        '山手線（JR東日本） 東京→神田 ｜ 丸ノ内線（東京メトロ） 東京→新宿'
+      );
     });
 
     it('legsが空なら代替文言を返す', () => {
@@ -215,105 +214,100 @@ describe('game.ts helpers with mini network', () => {
     });
 
     it('formatItinerary は Itinerary.legs を同じ形式に整形する', () => {
-      const itinerary = searchRoute(network, tokyoJr, shinjukuJr, DEPART_SEC, 'transfers')!;
-      expect(itinerary).not.toBeNull();
+      const legs = [{ line: marunouchi, from: tokyoMarunouchi, to: shinjukuMarunouchi, rideSec: 1200 }];
+      const itinerary: Itinerary = { legs, rideSec: 1200, totalSec: 1200, transfers: 0 };
       expect(formatItinerary(network, itinerary)).toBe(formatRouteLegs(network, itinerary.legs));
     });
   });
 
-  describe('judgeAnswer: 東京->新宿の判定ロジック', () => {
-    // raptor.test.ts と同じ DEPART_SEC(9:08発) を用いる。
-    // 丸ノ内線直通(乗換0・170円・9:36着)が mode=transfers/fare の模範解答、
-    // 丸ノ内線->中央線の乗換1回(9:26着)が mode=time の模範解答になる。
+  describe('judgeAnswer: time モード', () => {
+    it('ちょうど1.1倍は perfect になる', () => {
+      const reference: Itinerary = {
+        legs: [],
+        rideSec: 1000,
+        totalSec: 1000,
+        transfers: 0,
+      };
+      const evaluation = { transfers: 0, rideSec: 1100, totalSec: 1100 };
+      const judgement = judgeAnswer('time', evaluation, reference);
+      expect(judgement.level).toBe('perfect');
+    });
 
+    it('1.1倍を超えると good になり、模範解答の推定時間を含む', () => {
+      const reference: Itinerary = {
+        legs: [],
+        rideSec: 1000,
+        totalSec: 1000,
+        transfers: 0,
+      };
+      const evaluation = { transfers: 0, rideSec: 1101, totalSec: 1101 };
+      const judgement = judgeAnswer('time', evaluation, reference);
+      expect(judgement.level).toBe('good');
+      expect(judgement.message).toContain(formatEstimatedDuration(reference.totalSec));
+    });
+
+    it('evaluationのtotalSecがnullなら good になる', () => {
+      const reference: Itinerary = { legs: [], rideSec: 1000, totalSec: 1000, transfers: 0 };
+      const evaluation = { transfers: 0, rideSec: 0, totalSec: null };
+      const judgement = judgeAnswer('time', evaluation, reference);
+      expect(judgement.level).toBe('good');
+    });
+  });
+
+  describe('judgeAnswer: transfers モード', () => {
+    it('同数なら perfect になる', () => {
+      const reference: Itinerary = { legs: [], rideSec: 0, totalSec: 0, transfers: 1 };
+      const evaluation = { transfers: 1, rideSec: 0, totalSec: 0 };
+      const judgement = judgeAnswer('transfers', evaluation, reference);
+      expect(judgement.level).toBe('perfect');
+    });
+
+    it('模範解答より少なければ perfect になる', () => {
+      const reference: Itinerary = { legs: [], rideSec: 0, totalSec: 0, transfers: 2 };
+      const evaluation = { transfers: 1, rideSec: 0, totalSec: 0 };
+      const judgement = judgeAnswer('transfers', evaluation, reference);
+      expect(judgement.level).toBe('perfect');
+    });
+
+    it('模範解答より多ければ good になる', () => {
+      const reference: Itinerary = { legs: [], rideSec: 0, totalSec: 0, transfers: 0 };
+      const evaluation = { transfers: 1, rideSec: 0, totalSec: 0 };
+      const judgement = judgeAnswer('transfers', evaluation, reference);
+      expect(judgement.level).toBe('good');
+      expect(judgement.message).toContain('乗換0回');
+    });
+  });
+
+  describe('judgeAnswer: reference が null', () => {
+    it('modeによらず good 判定になる', () => {
+      const evaluation = { transfers: 3, rideSec: 999, totalSec: 999 };
+      expect(judgeAnswer('transfers', evaluation, null).level).toBe('good');
+      expect(judgeAnswer('time', evaluation, null).level).toBe('good');
+    });
+  });
+
+  describe('evaluateRouteとの結合（実ネットワーク上での判定）', () => {
     it('丸ノ内線直通で回答すると、transfersモードでパーフェクト判定になる', () => {
-      const legs: RouteLeg[] = [{ line: marunouchi, from: tokyoMetro, to: shinjukuMetro }];
-      const validation = validateRoute(network, tokyoJr, shinjukuJr, legs);
+      const legs: RouteLeg[] = [{ line: marunouchi, from: tokyoMarunouchi, to: shinjukuMarunouchi }];
+      const validation = validateRoute(network, tokyoYamanote, shinjukuYamanote, legs);
       expect(validation.valid).toBe(true);
 
-      const evaluation = evaluateRoute(network, legs, DEPART_SEC);
-      const reference = searchRoute(network, tokyoJr, shinjukuJr, DEPART_SEC, 'transfers');
-      expect(reference).not.toBeNull();
-      expect(reference!.transfers).toBe(0);
+      const evaluation = evaluateRoute(network, legs);
+      const reference: Itinerary = { legs: [], rideSec: 660, totalSec: 660, transfers: 0 };
 
       const judgement = judgeAnswer('transfers', evaluation, reference);
       expect(judgement.level).toBe('perfect');
     });
 
-    it('丸ノ内線直通で回答すると、fareモードでもパーフェクト判定になる（同額170円）', () => {
-      const legs: RouteLeg[] = [{ line: marunouchi, from: tokyoMetro, to: shinjukuMetro }];
-      const evaluation = evaluateRoute(network, legs, DEPART_SEC);
-      const reference = searchRoute(network, tokyoJr, shinjukuJr, DEPART_SEC, 'fare');
-
-      const judgement = judgeAnswer('fare', evaluation, reference);
-      expect(judgement.level).toBe('perfect');
-      expect(evaluation.fare).toBe(170);
-    });
-
-    it('丸ノ内線直通で回答すると、timeモードでは模範解答（乗換1回・17分）より遅いため perfect にならない', () => {
-      const legs: RouteLeg[] = [{ line: marunouchi, from: tokyoMetro, to: shinjukuMetro }];
-      const evaluation = evaluateRoute(network, legs, DEPART_SEC);
-      const reference = searchRoute(network, tokyoJr, shinjukuJr, DEPART_SEC, 'time');
-      expect(reference).not.toBeNull();
+    it('丸ノ内線直通で回答すると、timeモードでは中央線直通の模範解答より遅いため perfect にならない', () => {
+      const legs: RouteLeg[] = [{ line: marunouchi, from: tokyoMarunouchi, to: shinjukuMarunouchi }];
+      const evaluation = evaluateRoute(network, legs);
+      // 中央線直通(660秒)が time モードの模範解答
+      const reference: Itinerary = { legs: [], rideSec: 660, totalSec: 660, transfers: 0 };
 
       const judgement = judgeAnswer('time', evaluation, reference);
       expect(judgement.level).toBe('good');
       expect(judgement.message).toContain('模範解答');
-    });
-
-    it('乗換ルート（丸ノ内線->中央線）で回答すると、timeモードでパーフェクト判定になる', () => {
-      const ochanomizuMetro = findStationIndex(network, '御茶ノ水', 'metro');
-      const ochanomizuJr = findStationIndex(network, '御茶ノ水', 'jr');
-      const chuo = findLineIndex(network, '中央線', 'jr');
-
-      const legs: RouteLeg[] = [
-        { line: marunouchi, from: tokyoMetro, to: ochanomizuMetro },
-        { line: chuo, from: ochanomizuJr, to: shinjukuJr },
-      ];
-      const validation = validateRoute(network, tokyoJr, shinjukuJr, legs);
-      expect(validation.valid).toBe(true);
-
-      const evaluation = evaluateRoute(network, legs, DEPART_SEC);
-      const reference = searchRoute(network, tokyoJr, shinjukuJr, DEPART_SEC, 'time');
-      expect(reference).not.toBeNull();
-      expect(reference!.transfers).toBe(1);
-
-      const judgement = judgeAnswer('time', evaluation, reference);
-      expect(judgement.level).toBe('perfect');
-    });
-
-    it('回帰: 模範解答と完全に同一の経路なら timeモードで必ずパーフェクトになる（秋葉原→御茶ノ水）', () => {
-      // 修正前: プレイヤー側の所要時間は DEPART_SEC(9:08)起点（初回の列車待ち込み）、
-      // 模範解答側は arrive - depart（実乗車時刻起点、待ちなし）で基準がずれており、
-      // 同一経路でも「±10%以内」を満たせずパーフェクトを逃していた。
-      const akihabaraJr = findStationIndex(network, '秋葉原', 'jr');
-      const ochanomizuJr = findStationIndex(network, '御茶ノ水', 'jr');
-
-      const reference = searchRoute(network, akihabaraJr, ochanomizuJr, DEPART_SEC, 'time');
-      expect(reference).not.toBeNull();
-
-      // 模範解答とまったく同じ legs で回答する
-      const legs: RouteLeg[] = reference!.legs.map((l) => ({
-        line: l.line,
-        from: l.from,
-        to: l.to,
-      }));
-      const validation = validateRoute(network, akihabaraJr, ochanomizuJr, legs);
-      expect(validation.valid).toBe(true);
-
-      const evaluation = evaluateRoute(network, legs, DEPART_SEC);
-      // 同一経路なら到着時刻も一致するはず
-      expect(evaluation.arriveSec).toBe(reference!.arrive);
-
-      const judgement = judgeAnswer('time', evaluation, reference, DEPART_SEC);
-      expect(judgement.level).toBe('perfect');
-    });
-
-    it('模範解答が見つからない場合は good 判定になる', () => {
-      const legs: RouteLeg[] = [{ line: marunouchi, from: tokyoMetro, to: shinjukuMetro }];
-      const evaluation = evaluateRoute(network, legs, DEPART_SEC);
-      const judgement = judgeAnswer('transfers', evaluation, null);
-      expect(judgement.level).toBe('good');
     });
   });
 });

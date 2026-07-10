@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNetwork } from '../scripts/buildNetwork.ts';
-import { miniGtfsFeeds } from './fixtures/miniGtfs.ts';
+import { miniNetwork } from './fixtures/miniEkidata.ts';
 import { AREA_LABELS, pointInArea, stationsInArea } from '../src/lib/area.ts';
 
 describe('pointInArea', () => {
@@ -48,7 +47,7 @@ describe('pointInArea', () => {
 });
 
 describe('stationsInArea', () => {
-  const { network } = buildNetwork(miniGtfsFeeds());
+  const network = miniNetwork();
 
   it('ミニネットワークの全駅が tokyo23 内（すべて都心の駅のため）', () => {
     const inArea = stationsInArea(network, 'tokyo23');

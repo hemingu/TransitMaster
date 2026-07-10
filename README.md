@@ -2,83 +2,142 @@
 
 ランダムに与えられる2駅間について、実際の鉄道路線図を思い浮かべながら「経路（利用する路線と乗換駅）」を自分の頭で答えるブラウザゲームです。完全静的な SPA として実装されており、GitHub Pages 上でそのまま動作します。
 
+## 目次
+
+- [ゲーム概要](#ゲーム概要)
+- [遊び方](#遊び方)
+- [セットアップ](#セットアップ)
+- [所要時間の推定モデル](#所要時間の推定モデル)
+- [検証コマンド](#検証コマンド)
+- [アーキテクチャ概説](#アーキテクチャ概説)
+- [デプロイ](#デプロイ)
+- [データ出典・クレジット](#データ出典クレジット)
+- [テスト・ビルドコマンド一覧](#テストビルドコマンド一覧)
+
+
 ## ゲーム概要
 
 - 出題: ランダムな2駅間が示されるので、乗換駅と利用路線を答える。
 - エリア: 東京23区内 / 東京都内 / 名古屋市内 / 大阪市内 / 日本全国 の5種類から選択可能。
-- 模範解答モード: 以下の3モードで「模範解答」となる経路が変わる。
-  - 最短時間（time）
-  - 最小乗換回数（transfers）
-  - 最安運賃（fare）
-- 経路探索はブラウザ内で完結する（サーバー通信なし）。
+- 模範解答モード: 以下の2モードで「模範解答」となる経路が変わる（運賃モードは未対応）。
+  - 最短時間（推定）
+  - 最小乗換回数
+- 経路探索・採点はすべてブラウザ内で完結する（サーバー通信なし）。
 
-## セットアップ（ミニデータですぐ遊べる）
+## 遊び方
 
-実データ（ODPT の GTFS）を使わなくても、リポジトリに同梱のフィクスチャ（ミニGTFS）ですぐに動作確認できます。
+1. エリアと模範解答モードを選び、出題された出発駅・到着駅を確認する。
+2. テキストボックスに路線名を入力するとオートコンプリートが表示されるので、現在の駅から乗る路線を選ぶ。
+3. 続いて同じ路線上の降車駅（乗換駅、または最終的な到着駅）をオートコンプリートから選ぶ。
+4. 到着駅に着くまで「路線を選ぶ→降車駅を選ぶ」を繰り返し、最後に解答を確定する。
+5. 選んだモードの模範解答と比較し、パーフェクト／正解／不正解が判定される。
+
+## セットアップ
+
+### 1. 依存関係のインストール
 
 ```bash
 npm install
-npm run build:network -- --fixture   # tests/fixtures のミニGTFSから public/data/network.json を生成
+```
+
+### 2. データ準備（実データの場合）
+
+本アプリは駅データ.jp無料版CSVを主データ源とし、新幹線区間を国土数値情報N02で補完しています。
+
+1. [駅データ.jp](https://ekidata.jp/) に無料会員登録し、「事業者」「路線」「駅」「接続駅」の4種類のCSVをダウンロードします。
+2. ダウンロードしたCSVを `data/ekidata/` に配置します。ファイル名は `company` / `line` / `station` / `join` のいずれかで始まっていれば自動的に認識されます。
+   - **駅データ.jpのCSVは再配布禁止のため、リポジトリにはコミットしないでください**（`data/ekidata/` は `.gitignore` 済みです）。
+3. 新幹線データを取得します（国土数値情報N02、約15MB）。
+   ```bash
+   npm run fetch:n02
+   ```
+   `data/n02/` に展開されます（こちらも `.gitignore` 済み）。
+
+データを用意しない場合は、後述の `--fixture` オプションでミニデータを使って動作確認できます。
+
+### 3. network.json の生成
+
+```bash
+npm run build:network
+```
+
+`data/ekidata/` のCSVと `data/n02/` のN02データを読み込み、`public/data/network.json` を生成します。このファイルは**リポジトリにコミットする運用**です（ビルド時に毎回生成し直すのではなく、手元で生成してコミットし、CIはコミット済みのファイルの存在チェックのみを行います）。
+
+データなしで試したい場合は、リポジトリ同梱のフィクスチャ（ミニデータ）でビルドできます。
+
+```bash
+npm run build:network -- --fixture
+```
+
+### 4. 開発サーバー起動
+
+```bash
 npm run dev
 ```
 
 `http://localhost:5173`（Vite のデフォルトポート）でゲームが起動します。
 
-## 実データ（ODPT GTFS）を使う手順
+## 所要時間の推定モデル
 
-本番相当のデータで遊ぶには、ODPT（公共交通オープンデータセンター）が提供する GTFS を取得します。
+本アプリは実際の時刻表を保持していません（時刻表・運賃データは廃止済み）。駅間の所要時間は以下の式による**推定値**です。
 
-1. **ODPT 開発者登録**（無料）
-   [developer.odpt.org](https://developer.odpt.org/) でユーザー登録し、アクセストークンを発行します。承認には最大2営業日程度かかる場合があります。
-2. **トークンを環境変数に設定**
-   ```bash
-   export ODPT_TOKEN=xxxxxxxxxxxxxxxx
-   ```
-3. **鉄道 GTFS データセットの一覧を取得**（トークン不要）
-   ```bash
-   npm run fetch:gtfs -- --list
-   ```
-   ODPT の CKAN データカタログ（https://ckan.odpt.org）から鉄道 GTFS を検索し、`data/gtfs/manifest.json` に一覧を保存します。
-4. **GTFS zip をダウンロード**
-   ```bash
-   npm run fetch:gtfs
-   ```
-   manifest.json の各リソースを `data/gtfs/*.zip` にダウンロードします。`ODPT_TOKEN` が必要なリソースは、未設定の場合スキップして警告を出します（トークン不要で取得できる公開データのみダウンロードされます）。
-5. **network.json を再生成**
-   ```bash
-   npm run build:network
-   ```
-   `data/gtfs/*.zip` が存在する場合は自動的にそれらを読み込みます（`--fixture` を付けなければ実データが優先されます）。
-6. `npm run dev` または `npm run build` で反映を確認します。
+```
+区間所要秒 = 駅間距離 ÷ 表定速度 + （新幹線以外は1.2倍のマージン）
+乗換ペナルティ = 1回あたり300秒（固定）
+```
 
-### ODPT データ取得についての補足（調査結果）
+- 駅間距離: 通常はハバーシン距離（緯度経度から算出する2駅間の直線距離）。新幹線区間は国土数値情報N02の沿線ポリラインに基づく実際の線形距離を使用。
+- 表定速度: 新幹線 200km/h、JR在来線 60km/h、私鉄 55km/h、地下鉄 35km/h、モノレール・新交通システム 30km/h、路面電車 20km/h（路線名・事業者名から自動分類）。
+- マージン1.2倍は、加減速やカーブなど実際の走行時間との差を簡易に織り込むためのもので、新幹線区間（N02由来）には適用しません。
 
-`scripts/fetch-gtfs.ts` を実装するにあたり実際に ODPT の CKAN カタログを調査した結果、以下がわかっています。
+以下は実ダイヤに基づく計算ではないことに起因する既知の近似です。
 
-- CKAN の REST API（`/api/3/action/package_search` 等）は `robots.txt` で `Disallow: /api/` が指定されており、実際にリクエストすると nginx がデータセット一覧ページへ 301 リダイレクトしてしまうため **API 経由では取得できません**。そのため `fetch-gtfs.ts` は公開されているデータセット検索・詳細の HTML ページをスクレイピングして情報を取得しています。
-- 検索条件 `res_format=GTFS/GTFS-JP` かつ タグ `鉄道-railway` で **鉄道 GTFS データセットが10件** ヒットします（2026年7月時点）。関東の事業者（東京メトロ・都営地下鉄・東武鉄道・京王電鉄・りんかい線・多摩都市モノレール・つくばエクスプレス・横浜市営地下鉄）が中心で、関東以外は京都市営地下鉄・函館市電の2件のみです。関西・中部・九州の主要私鉄の多くは現状カタログに未掲載です。
-- 認証方式は事業者によって3パターンあります。
-  - `api-public.odpt.org` 配下: **トークン不要**（都営地下鉄・函館市電）。
-  - `api.odpt.org` 配下: 通常のアクセストークンが `?acl:consumerKey=<トークン>` として必要（基本ライセンス）。
-  - `api-challenge.odpt.org` 配下: 「公共交通オープンデータチャレンジ限定ライセンス」の別枠トークンが必要（京王電鉄・東武鉄道など）。通常の `ODPT_TOKEN` では 401/403 になる可能性があります。
-  - トークン不要の2件（都営地下鉄・函館市電）は実際にダウンロードして疎通確認済みで、いずれも `fare_attributes.txt` / `fare_rules.txt` を含んでおり運賃データも利用できます。
+- 新幹線の直通系統（例: 「はやぶさ」など東北新幹線↔北海道新幹線をまたぐ系統）は、実際には乗換不要な直通運転でも、本アプリのモデル上は路線境界で乗換1回として扱われます。
+- 都営地下鉄大江戸線のような環状構造で環をまたぐ経路も、環の切れ目で乗換1回として扱われることがあります。
+- ミニ新幹線（山形新幹線・秋田新幹線）は在来線の線路を走るため、新幹線ではなく在来線（表定速度60km/h）として分類されます。
+
+## 検証コマンド
+
+```bash
+npm test                       # ユニットテスト（Vitest）
+npm run route -- 東京 新大阪    # 実データでの経路探索を手元で確認するCLI
+```
+
+`route` コマンドの詳細:
+
+```bash
+npm run route -- <出発駅名> <到着駅名> [time|transfers]
+```
+
+- `public/data/network.json` を読み込み、指定した2駅間を実際に `searchRoute`（探索本体）で探索し、経路（路線・乗換駅）・乗換回数・推定所要時間を表示します。
+- モード（`time` または `transfers`）を省略すると両方のモードで探索します。
+- 駅名は完全一致（NFKC正規化後）で検索します。同名の駅が複数のグループ（例: 別の都市に同名駅がある場合）に存在するときは一意に決まらないため、候補一覧（駅名＋乗り入れ路線）を表示して終了します。
 
 ## アーキテクチャ概説
 
-1. **GTFS → network.json（ビルド時）**
-   `data/gtfs/*.zip`（GTFS フィード）を `scripts/build-network.ts` が読み込み、駅・路線・時刻表・乗換グループ・運賃情報を統合した `public/data/network.json` を生成します（`scripts/buildNetwork.ts` が実処理、`scripts/gtfsCsv.ts` が GTFS CSV パーサ）。
-2. **経路探索（ブラウザ内 RAPTOR）**
-   `src/lib/raptor.ts` が RAPTOR アルゴリズムで最短時間・最小乗換・最安運賃の経路を計算します。UI をブロックしないよう `src/worker/routing.worker.ts`（Web Worker）上で実行し、`src/components/useRoutingWorker.ts` から呼び出します。
+1. **駅データ.jp CSV + N02 → network.json（ビルド時）**
+   `scripts/build-ekidata-network.ts` が `data/ekidata/*.csv`（駅データ.jp無料版）と `data/n02/*.geojson`（国土数値情報N02、新幹線補完用）を読み込み、`scripts/buildEkidataNetwork.ts` の実処理を経て駅・路線・停車パターン・駅間所要秒を統合した `public/data/network.json`（Network v2）を生成します。
+2. **経路探索（ブラウザ内 RAPTOR 風探索）**
+   `src/lib/raptor.ts` の `searchRoute(network, from, to, mode)` が、駅間所要秒ベースの疑似RAPTORアルゴリズムで最短時間・最小乗換の経路を計算します。`from`/`to` は駅index、戻り値は `Itinerary`（`legs` / `rideSec` / `totalSec` / `transfers`）です。
 3. **エリア判定**
-   `src/lib/area.ts` が `src/data/areas.json`（GeoJSON 由来のポリゴン）を使い、point-in-polygon 判定で駅がどのエリアに属するかを判定します。ポリゴンは `scripts/build-areas.ts` により外部の GeoJSON から生成されます。
-4. **出題・採点**
-   `src/lib/question.ts` が出題（駅ペア選択・難易度に応じた乗換回数レンジ）、`src/lib/validate.ts` が回答の採点、`src/lib/game.ts` がゲーム進行を担当します。
+   `src/lib/area.ts` が `src/data/areas.json`（GeoJSON由来のポリゴン）を使い、point-in-polygon 判定で駅がどのエリアに属するかを判定します。
+4. **出題・採点・表示整形**
+   `src/lib/question.ts` が出題、`src/lib/validate.ts` が回答の採点、`src/lib/game.ts` が `formatLineName`（路線名の整形）・`formatEstimatedDuration`（推定所要時間の整形）・`formatRouteLegs`（経路の整形）・`stationDisplayName`（駅名表示）などの表示用ヘルパーとゲーム進行を担当します。
+
+## デプロイ
+
+`main` ブランチへの push で GitHub Actions（`.github/workflows/deploy.yml`）が自動的に以下を実行し、GitHub Pages にデプロイします。
+
+1. `npm ci`
+2. `npm test`（失敗時はデプロイしない）
+3. `public/data/network.json` の存在チェック（コミット漏れの検知。生成自体はCI上では行わない）
+4. `npm run build`
+5. GitHub Pages へアップロード・デプロイ
 
 ## データ出典・クレジット
 
-- **GTFS 交通データ**: 本アプリは [公共交通オープンデータセンター（ODPT）](https://www.odpt.org/) が公開する GTFS データを利用しています。データの正式なクレジット表記・詳細な利用条件は [developer.odpt.org の利用規約ページ](https://developer.odpt.org/terms) に従ってください（当該ページは JavaScript が必要な SPA のため、実データを配布・公開する際は必ず開発者サイトにログインして最新の利用条件・クレジット表記文言を確認してください）。一般に ODPT データを利用する場合は「本アプリは公共交通オープンデータセンターが公開するデータを利用しています」旨の表記と、データ提供事業者名の明記が求められます。
-- **区市町村・都道府県境界データ**: [niiyz/JapanCityGeoJson](https://github.com/niiyz/JapanCityGeoJson)（市区町村ポリゴン）、[dataofjapan/land](https://github.com/dataofjapan/land)（都道府県ポリゴン）を使用しています。
-- デプロイ時（GitHub Actions）はトークン未取得の間、`tests/fixtures` のフィクスチャ（架空のミニGTFS）でビルドしています。実データに切り替える手順は上記「実データ（ODPT GTFS）を使う手順」を参照してください。
+- 本アプリは[駅データ.jp](https://ekidata.jp/)のデータを加工して利用しています。
+- 本アプリは「国土数値情報（鉄道データ）」（国土交通省）（https://nlftp.mlit.go.jp/ksj/）を加工して作成しています。
 
 ## テスト・ビルドコマンド一覧
 
@@ -90,17 +149,7 @@ npm run dev
 | `npm run preview` | ビルド成果物のプレビュー |
 | `npm test` | Vitest によるユニットテスト実行 |
 | `npm run lint` | Oxlint による静的解析 |
-| `npm run build:network -- --fixture` | フィクスチャ（ミニGTFS）から `public/data/network.json` を生成 |
-| `npm run build:network` | `data/gtfs/*.zip`（実データ）から `public/data/network.json` を生成 |
-| `npm run fetch:gtfs -- --list` | ODPT CKAN カタログから鉄道 GTFS データセット一覧を取得（トークン不要） |
-| `npm run fetch:gtfs` | manifest.json の各リソースを `data/gtfs/*.zip` にダウンロード（`ODPT_TOKEN` 使用） |
-
-## デプロイ
-
-`main` ブランチへの push で GitHub Actions（`.github/workflows/deploy.yml`）が自動的に以下を実行し、GitHub Pages にデプロイします。
-
-1. `npm ci`
-2. `npm test`（失敗時はデプロイしない）
-3. `npm run build:network -- --fixture`（現状はフィクスチャデータ。実データに切り替える場合は上記手順を参照し、ワークフロー内のコメントに従って `fetch:gtfs` 呼び出しに置き換えてください）
-4. `npm run build`
-5. GitHub Pages へアップロード・デプロイ
+| `npm run fetch:n02` | 国土数値情報N02（新幹線補完データ）を `data/n02/` に取得 |
+| `npm run build:network` | `data/ekidata/`（駅データ.jp CSV）＋ `data/n02/` から `public/data/network.json` を生成 |
+| `npm run build:network -- --fixture` | フィクスチャ（ミニデータ）から `public/data/network.json` を生成 |
+| `npm run route -- <出発駅> <到着駅> [time\|transfers]` | 実データでの経路探索結果を手元で確認するCLI |

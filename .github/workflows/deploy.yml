@@ -35,18 +35,11 @@ jobs:
       - name: Run tests
         run: npm test
 
-      # ODPT の CKAN カタログから鉄道 GTFS リソースを棚卸しして manifest.json を作る
-      - name: List ODPT GTFS resources
-        run: npm run fetch:gtfs -- --list
-
-      # manifest.json の各リソースをダウンロード（要トークンのものは ODPT_TOKEN を使用）
-      - name: Fetch GTFS feeds
-        run: npm run fetch:gtfs
-        env:
-          ODPT_TOKEN: ${{ secrets.ODPT_TOKEN }}
-
-      - name: Build network.json (real data)
-        run: npm run build:network
+      # network.json はリポジトリにコミットされている想定（駅データ.jp CSV + 国土数値情報N02
+      # から手元でビルドし、public/data/network.json としてコミットする運用）。
+      # コミット漏れを検知するため、ここでは存在確認のみ行う。
+      - name: Check network.json exists
+        run: test -f public/data/network.json
 
       - name: Build
         run: npm run build

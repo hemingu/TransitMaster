@@ -9,8 +9,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
-    "build:network": "tsx scripts/build-network.ts",
-    "fetch:gtfs": "tsx scripts/fetch-gtfs.ts"
+    "build:network": "tsx scripts/build-ekidata-network.ts",
+    "fetch:n02": "tsx scripts/fetch-n02.ts",
+    "route": "tsx scripts/route-check.ts"
   },
   "dependencies": {
     "fflate": "^0.8.3",

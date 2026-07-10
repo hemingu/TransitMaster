@@ -1,4 +1,5 @@
 import type { Network } from './types.ts';
+import { getNetworkIndex } from './networkIndex.ts';
 
 export interface Question {
   origin: number;
@@ -27,16 +28,9 @@ function minTransfersBetweenGroups(
 ): number | null {
   if (originGroup === destGroup) return 0;
 
-  // 各路線が停車する乗換グループの集合
-  const lineGroups: Set<number>[] = network.lines.map((line) => {
-    const groups = new Set<number>();
-    for (const pattern of line.patterns) {
-      for (const stopIdx of pattern.stops) {
-        groups.add(network.stations[stopIdx].group);
-      }
-    }
-    return groups;
-  });
+  // 各路線が停車する乗換グループの集合（NetworkIndexでキャッシュ済みのものを利用し、
+  // 出題リトライのたびに全路線を線形走査する再計算を避ける）
+  const lineGroups = getNetworkIndex(network).lineGroups;
 
   const originLines: number[] = [];
   const destLines: number[] = [];

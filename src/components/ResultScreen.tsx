@@ -1,17 +1,14 @@
 import {
-  formatDuration,
-  formatFare,
+  formatEstimatedDuration,
   formatRouteLegs,
   reasonMessage,
 } from '../lib/game.ts';
-import type { RouteEvaluation } from '../lib/validate.ts';
-import type { AnswerMode, Itinerary, Network, RouteLeg } from '../lib/types.ts';
+import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from '../lib/types.ts';
 import type { Judgement } from '../lib/game.ts';
 
 interface ResultScreenProps {
   network: Network;
   mode: AnswerMode;
-  departSec: number;
   legs: RouteLeg[];
   streak: number;
   totalCorrect: number;
@@ -27,15 +24,13 @@ interface ResultScreenProps {
 }
 
 const MODE_LABELS: Record<AnswerMode, string> = {
-  time: '最短時間',
+  time: '最短時間（推定）',
   transfers: '最小乗換',
-  fare: '最安運賃',
 };
 
 export function ResultScreen({
   network,
   mode,
-  departSec,
   legs,
   streak,
   totalCorrect,
@@ -82,11 +77,10 @@ export function ResultScreen({
                   <li>乗換回数: {evaluation.transfers}回</li>
                   <li>
                     所要時間:{' '}
-                    {evaluation.durationSec !== null
-                      ? `${formatDuration(evaluation.durationSec)}（待ち時間含む）`
+                    {evaluation.totalSec !== null
+                      ? formatEstimatedDuration(evaluation.totalSec)
                       : '不明'}
                   </li>
-                  <li>運賃: {formatFare(evaluation.fare)}</li>
                 </ul>
               )}
             </div>
@@ -102,9 +96,7 @@ export function ResultScreen({
                   <p className="answer-route">{formatRouteLegs(network, reference.legs)}</p>
                   <ul className="stat-list">
                     <li>乗換回数: {reference.transfers}回</li>
-                    {/* 判定と同じ基準（出題の出発時刻起点＝初回の列車待ち込み）で表示する */}
-                    <li>所要時間: {formatDuration(reference.arrive - departSec)}（待ち時間含む）</li>
-                    <li>運賃: {formatFare(reference.fare)}</li>
+                    <li>所要時間: {formatEstimatedDuration(reference.totalSec)}</li>
                   </ul>
                 </>
               )}

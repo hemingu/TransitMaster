@@ -1,20 +1,20 @@
 import { useMemo, useState } from 'react';
 import {
   buildLeg,
-  filterStationsByQuery,
-  formatClock,
+  formatLineName,
   linesThroughStation,
   stationDisplayName,
   stationsOnLine,
 } from '../lib/game.ts';
+import type { AutocompleteOption } from '../lib/autocomplete.ts';
 import type { Network, RouteLeg } from '../lib/types.ts';
+import { AutocompleteInput } from './AutocompleteInput.tsx';
 import { LineBadge } from './LineBadge.tsx';
 
 interface RouteBuilderScreenProps {
   network: Network;
   origin: number;
   destination: number;
-  departSec: number;
   streak: number;
   totalCorrect: number;
   totalAnswered: number;
@@ -30,7 +30,6 @@ export function RouteBuilderScreen({
   network,
   origin,
   destination,
-  departSec,
   streak,
   totalCorrect,
   totalAnswered,
@@ -42,26 +41,37 @@ export function RouteBuilderScreen({
   onSubmit,
 }: RouteBuilderScreenProps) {
   const [selectedLine, setSelectedLine] = useState<number | null>(null);
-  const [query, setQuery] = useState('');
 
   const currentGroup = network.stations[currentStation].group;
   const destinationGroup = network.stations[destination].group;
   const reachedDestination = currentGroup === destinationGroup;
 
-  const availableLines = useMemo(
-    () => linesThroughStation(network, currentStation),
-    [network, currentStation]
-  );
+  const lineOptions = useMemo<AutocompleteOption[]>(() => {
+    const lineIdxs = linesThroughStation(network, currentStation);
+    return lineIdxs.map((lineIdx) => {
+      const line = network.lines[lineIdx];
+      const label = formatLineName(network, lineIdx);
+      return {
+        id: lineIdx,
+        label,
+        searchText: label,
+        badge: { name: line.name, company: line.company, color: line.color },
+      };
+    });
+  }, [network, currentStation]);
 
-  const alightingCandidates = useMemo(() => {
+  const stationOptions = useMemo<AutocompleteOption[]>(() => {
     if (selectedLine === null) return [];
     const stations = stationsOnLine(network, selectedLine, currentGroup);
-    return filterStationsByQuery(stations, query);
-  }, [network, selectedLine, currentGroup, query]);
+    return stations.map((s) => ({
+      id: s.stationIdx,
+      label: s.name,
+      searchText: s.name,
+    }));
+  }, [network, selectedLine, currentGroup]);
 
   function handleSelectLine(lineIdx: number) {
     setSelectedLine(lineIdx);
-    setQuery('');
   }
 
   function handleAlight(stationIdx: number) {
@@ -71,18 +81,15 @@ export function RouteBuilderScreen({
     if (!leg) return;
     onAddLeg(leg);
     setSelectedLine(null);
-    setQuery('');
   }
 
   function handleUndo() {
     setSelectedLine(null);
-    setQuery('');
     onUndo();
   }
 
   function handleReset() {
     setSelectedLine(null);
-    setQuery('');
     onReset();
   }
 
@@ -99,7 +106,6 @@ export function RouteBuilderScreen({
         <p>
           <strong>{stationDisplayName(network, origin)}</strong> 駅から{' '}
           <strong>{stationDisplayName(network, destination)}</strong> 駅まで
-          （平日 {formatClock(departSec)} 発）
         </p>
       </div>
 
@@ -111,7 +117,11 @@ export function RouteBuilderScreen({
           ) : (
             legs.map((leg, i) => (
               <span className="route-leg-chip" key={i}>
-                <LineBadge name={network.lines[leg.line].name} />
+                <LineBadge
+                  name={network.lines[leg.line].name}
+                  company={network.lines[leg.line].company}
+                  color={network.lines[leg.line].color}
+                />
                 <span>
                   {stationDisplayName(network, leg.from)}→{stationDisplayName(network, leg.to)}
                 </span>
@@ -136,52 +146,34 @@ export function RouteBuilderScreen({
       {selectedLine === null ? (
         <div className="line-picker">
           <h2>乗る路線を選ぶ</h2>
-          {availableLines.length === 0 ? (
+          {lineOptions.length === 0 ? (
             <p className="muted">この駅から乗れる路線がありません。</p>
           ) : (
-            <div className="choice-grid">
-              {availableLines.map((lineIdx) => (
-                <button
-                  key={lineIdx}
-                  type="button"
-                  className="choice-button line-choice"
-                  onClick={() => handleSelectLine(lineIdx)}
-                >
-                  <LineBadge name={network.lines[lineIdx].name} />
-                </button>
-              ))}
-            </div>
+            <AutocompleteInput
+              options={lineOptions}
+              placeholder="路線名で検索（例: 銀座線）"
+              onSelect={handleSelectLine}
+              emptyMessage="該当する路線がありません。"
+            />
           )}
         </div>
       ) : (
         <div className="station-picker">
           <h2>
-            <LineBadge name={network.lines[selectedLine].name} />
+            <LineBadge
+              name={network.lines[selectedLine].name}
+              company={network.lines[selectedLine].company}
+              color={network.lines[selectedLine].color}
+            />
             で降りる駅を選ぶ
           </h2>
-          <input
-            type="text"
-            className="station-search"
-            placeholder="駅名で絞り込み"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+          <AutocompleteInput
+            options={stationOptions}
+            placeholder="駅名で検索"
+            onSelect={handleAlight}
+            emptyMessage="該当する駅がありません。"
+            autoFocus
           />
-          <div className="station-list">
-            {alightingCandidates.length === 0 ? (
-              <p className="muted">該当する駅がありません。</p>
-            ) : (
-              alightingCandidates.map((s) => (
-                <button
-                  key={s.stationIdx}
-                  type="button"
-                  className="station-list-item"
-                  onClick={() => handleAlight(s.stationIdx)}
-                >
-                  {s.name}
-                </button>
-              ))
-            )}
-          </div>
           <button type="button" className="link-button" onClick={() => setSelectedLine(null)}>
             路線選択に戻る
           </button>

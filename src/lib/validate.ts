@@ -1,4 +1,4 @@
-import type { Network, RouteLeg } from './types.ts';
+import type { Network, RouteEvaluation, RouteLeg } from './types.ts';
 
 export type InvalidReason =
   | 'empty'
@@ -124,92 +124,101 @@ export function validateRoute(
   return { valid: true };
 }
 
-export interface RouteEvaluation {
-  transfers: number;
-  fare: number | null;
-  durationSec: number | null;
-  arriveSec: number | null;
-}
-
 /**
- * 指定路線・区間 (from -> to、この順) を含む Pattern のうち、
- * from 発車時刻が earliestDepartSec 以降で最も早い trip を探す。
- * 見つかれば { depSec, arrSec } を返し、無ければ undefined。
+ * 指定路線の全 Pattern を合成した無向グラフ（ノード=駅index、辺重み=区間所要秒）上で、
+ * from から to への最短所要秒を Dijkstra 法で求める。
+ *
+ * 分岐路線（Y字など）はパターンごとに部分的な停車列しか持たないため、単一パターンの
+ * stops.indexOf だけでは分岐をまたぐ leg（例: 東山→西丘が別パターンの組み合わせでしか
+ * 表現できない場合）を正しく評価できない。全パターンの隣接区間を1つの無向グラフに
+ * 合成することで、validateRoute が許容する経路（隣接性さえ繋がっていれば良い）を
+ * 漏れなく評価できるようにする。
+ *
+ * 到達不能なら null を返す。
  */
-function findEarliestTrip(
+function shortestRideSecOnLine(
   network: Network,
   lineIdx: number,
   from: number,
   to: number,
-  earliestDepartSec: number,
-): { depSec: number; arrSec: number } | undefined {
+): number | null {
+  if (from === to) return 0;
   const line = network.lines[lineIdx];
-  if (!line) return undefined;
+  if (!line) return null;
 
-  let best: { depSec: number; arrSec: number } | undefined;
+  // 隣接リスト（無向、重み=segSec）を全 Pattern から構築
+  const adjacency = new Map<number, Map<number, number>>();
+  const addEdge = (a: number, b: number, w: number) => {
+    if (!adjacency.has(a)) adjacency.set(a, new Map());
+    if (!adjacency.has(b)) adjacency.set(b, new Map());
+    const mapA = adjacency.get(a)!;
+    const mapB = adjacency.get(b)!;
+    if (!mapA.has(b) || mapA.get(b)! > w) mapA.set(b, w);
+    if (!mapB.has(a) || mapB.get(a)! > w) mapB.set(a, w);
+  };
 
   for (const pattern of line.patterns) {
-    const fromIdx = pattern.stops.indexOf(from);
-    if (fromIdx === -1) continue;
-    const toIdx = pattern.stops.indexOf(to, fromIdx + 1);
-    if (toIdx === -1) continue; // from より後に to が無ければこの Pattern は該当なし
+    for (let i = 0; i < pattern.segSec.length; i++) {
+      addEdge(pattern.stops[i], pattern.stops[i + 1], pattern.segSec[i]);
+    }
+  }
 
-    for (const trip of pattern.trips) {
-      const depSec = trip[fromIdx];
-      if (depSec === undefined) continue;
-      if (depSec < earliestDepartSec) continue;
-      const arrSec = trip[toIdx];
-      if (arrSec === undefined) continue;
-      if (!best || depSec < best.depSec) {
-        best = { depSec, arrSec };
+  if (!adjacency.has(from) || !adjacency.has(to)) return null;
+
+  // Dijkstra法（駅数は小規模なので単純な優先度なし線形探索で十分）
+  const dist = new Map<number, number>([[from, 0]]);
+  const visited = new Set<number>();
+
+  for (;;) {
+    let cur: number | null = null;
+    let curDist = Number.POSITIVE_INFINITY;
+    for (const [node, d] of dist) {
+      if (!visited.has(node) && d < curDist) {
+        curDist = d;
+        cur = node;
+      }
+    }
+    if (cur === null) break;
+    if (cur === to) return curDist;
+    visited.add(cur);
+
+    for (const [next, weight] of adjacency.get(cur) ?? []) {
+      if (visited.has(next)) continue;
+      const candidate = curDist + weight;
+      if (!dist.has(next) || candidate < dist.get(next)!) {
+        dist.set(next, candidate);
       }
     }
   }
 
-  return best;
+  return dist.has(to) ? (dist.get(to) as number) : null;
 }
 
-export function evaluateRoute(
-  network: Network,
-  legs: RouteLeg[],
-  departSec: number,
-): RouteEvaluation {
+/**
+ * 確定した legs（validateRouteで有効と判定された経路）を評価し、乗車時間・乗換回数・
+ * 総所要秒（乗換ペナルティ込み）を返す。
+ *
+ * 各 leg は、その路線の全 Pattern を合成した無向グラフ上での from->to 最短所要秒として
+ * 評価する（分岐路線でパターンをまたぐ leg も正しく評価できる）。
+ * いずれかの leg が到達不能であれば totalSec は null（防御的。validateRoute を通った経路は
+ * 通常ここで null にはならない）。
+ */
+export function evaluateRoute(network: Network, legs: RouteLeg[]): RouteEvaluation {
   const transfers = legs.length - 1;
 
-  let fare: number | null = 0;
-  for (const leg of legs) {
-    const line = network.lines[leg.line];
-    const legFare = line ? line.fare : null;
-    if (legFare === null || legFare === undefined) {
-      fare = null;
-      break;
-    }
-    fare += legFare;
-  }
-
-  let t = departSec;
-  let durationSec: number | null = 0;
-  let arriveSec: number | null = null;
+  let rideSec = 0;
   let broken = false;
 
-  for (let i = 0; i < legs.length; i++) {
-    const leg = legs[i];
-    const earliestDepart = i === 0 ? t : t + network.transferSec;
-    const trip = findEarliestTrip(network, leg.line, leg.from, leg.to, earliestDepart);
-    if (!trip) {
+  for (const leg of legs) {
+    const sec = shortestRideSecOnLine(network, leg.line, leg.from, leg.to);
+    if (sec === null) {
       broken = true;
       break;
     }
-    t = trip.arrSec;
+    rideSec += sec;
   }
 
-  if (broken) {
-    durationSec = null;
-    arriveSec = null;
-  } else {
-    arriveSec = t;
-    durationSec = t - departSec;
-  }
+  const totalSec = broken ? null : rideSec + transfers * network.transferSec;
 
-  return { transfers, fare, durationSec, arriveSec };
+  return { transfers, rideSec, totalSec };
 }
