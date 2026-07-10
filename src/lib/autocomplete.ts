@@ -13,6 +13,12 @@ export interface AutocompleteOption {
   searchText: string;
   /** 路線バッジ表示用の補助情報（任意）。 */
   badge?: { name: string; company: string; color: string | null };
+  /**
+   * 候補行に小さく添える補足テキスト（任意）。同名別駅の区別などに使う
+   * （例: 駅候補に「大阪環状線（JR西日本）ほか」）。
+   * filterOptions のマッチ対象には含めない（検索は searchText のみ）。
+   */
+  note?: string;
 }
 
 /**

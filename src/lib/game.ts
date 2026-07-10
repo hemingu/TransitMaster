@@ -143,17 +143,21 @@ export function stationOnLineInGroup(
 /**
  * 経路組立UIの leg 生成用ヘルパー。
  * from（現在駅）・to（降車駅）をそれぞれ選択路線上の駅 index にマップした
- * RouteLeg を返す。どちらかが路線上に存在しなければ null。
+ * RouteLeg を返す。
+ *
+ * 路線・降車駅は全候補から自由入力で選べるため、選択路線上に存在しない駅が渡されうる。
+ * その場合はマッピングを諦めて元の駅 index をそのまま使う。即時エラーにはせず、
+ * 回答時に validateRoute が 'station-not-on-line' 等の理由付きで不正解と判定する
+ * （プレイヤーが路線名・駅名を自力で思い出すゲーム性のため、入力時点では正誤を明かさない）。
  */
 export function buildLeg(
   network: Network,
   lineIdx: number,
   fromStation: number,
   toStation: number
-): RouteLeg | null {
-  const from = stationOnLineInGroup(network, lineIdx, fromStation);
-  const to = stationOnLineInGroup(network, lineIdx, toStation);
-  if (from === null || to === null) return null;
+): RouteLeg {
+  const from = stationOnLineInGroup(network, lineIdx, fromStation) ?? fromStation;
+  const to = stationOnLineInGroup(network, lineIdx, toStation) ?? toStation;
   return { line: lineIdx, from, to };
 }
 

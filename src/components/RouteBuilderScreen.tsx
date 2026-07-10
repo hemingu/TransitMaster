@@ -1,11 +1,6 @@
 import { useMemo, useState } from 'react';
-import {
-  buildLeg,
-  formatLineName,
-  linesThroughStation,
-  stationDisplayName,
-  stationsOnLine,
-} from '../lib/game.ts';
+import { buildLeg, formatLineName, stationDisplayName } from '../lib/game.ts';
+import { getNetworkIndex } from '../lib/networkIndex.ts';
 import type { AutocompleteOption } from '../lib/autocomplete.ts';
 import type { Network, RouteLeg } from '../lib/types.ts';
 import { AutocompleteInput } from './AutocompleteInput.tsx';
@@ -46,29 +41,58 @@ export function RouteBuilderScreen({
   const destinationGroup = network.stations[destination].group;
   const reachedDestination = currentGroup === destinationGroup;
 
-  const lineOptions = useMemo<AutocompleteOption[]>(() => {
-    const lineIdxs = linesThroughStation(network, currentStation);
-    return lineIdxs.map((lineIdx) => {
-      const line = network.lines[lineIdx];
-      const label = formatLineName(network, lineIdx);
-      return {
-        id: lineIdx,
-        label,
-        searchText: label,
-        badge: { name: line.name, company: line.company, color: line.color },
-      };
-    });
-  }, [network, currentStation]);
+  // 路線候補は全路線。プレイヤーが路線名を自力で思い出して入力するゲーム性のため、
+  // 現在駅を通らない路線もあえて候補に含める（間違いは回答時に判定される）。
+  const lineOptions = useMemo<AutocompleteOption[]>(
+    () =>
+      network.lines.map((line, lineIdx) => {
+        const label = formatLineName(network, lineIdx);
+        return {
+          id: lineIdx,
+          label,
+          searchText: label,
+          badge: { name: line.name, company: line.company, color: line.color },
+        };
+      }),
+    [network]
+  );
 
+  // 降車駅候補は全駅（グループ＝物理駅単位で重複排除）。選択路線に依存しない静的リスト。
+  // 同名別駅（例: 大阪と東京の京橋）を区別できるよう、乗り入れ路線の要約を note に添える。
   const stationOptions = useMemo<AutocompleteOption[]>(() => {
-    if (selectedLine === null) return [];
-    const stations = stationsOnLine(network, selectedLine, currentGroup);
-    return stations.map((s) => ({
-      id: s.stationIdx,
-      label: s.name,
-      searchText: s.name,
-    }));
-  }, [network, selectedLine, currentGroup]);
+    const { lineGroups } = getNetworkIndex(network);
+
+    // グループ -> { 最初に見つかった路線, 乗り入れ路線数 }
+    const groupLineInfo = new Map<number, { firstLine: number; lineCount: number }>();
+    lineGroups.forEach((groups, lineIdx) => {
+      for (const group of groups) {
+        const info = groupLineInfo.get(group);
+        if (info) {
+          info.lineCount++;
+        } else {
+          groupLineInfo.set(group, { firstLine: lineIdx, lineCount: 1 });
+        }
+      }
+    });
+
+    const seenGroups = new Set<number>();
+    const options: AutocompleteOption[] = [];
+    network.stations.forEach((station, stationIdx) => {
+      if (seenGroups.has(station.group)) return;
+      seenGroups.add(station.group);
+      const info = groupLineInfo.get(station.group);
+      const note = info
+        ? `${formatLineName(network, info.firstLine)}${info.lineCount >= 2 ? 'ほか' : ''}`
+        : undefined;
+      options.push({
+        id: stationIdx,
+        label: station.name,
+        searchText: station.name,
+        note,
+      });
+    });
+    return options;
+  }, [network]);
 
   function handleSelectLine(lineIdx: number) {
     setSelectedLine(lineIdx);
@@ -76,9 +100,9 @@ export function RouteBuilderScreen({
 
   function handleAlight(stationIdx: number) {
     if (selectedLine === null) return;
-    // 現在駅が別フィードの駅 index の場合があるため、選択路線上の駅 index にマップして leg を作る
+    // 選択路線上の駅 index にマップして leg を作る。路線上にない駅ならそのままの index が
+    // 使われ、回答時に validateRoute が不正解として弾く（入力時点では正誤を明かさない）。
     const leg = buildLeg(network, selectedLine, currentStation, stationIdx);
-    if (!leg) return;
     onAddLeg(leg);
     setSelectedLine(null);
   }
@@ -145,17 +169,13 @@ export function RouteBuilderScreen({
 
       {selectedLine === null ? (
         <div className="line-picker">
-          <h2>乗る路線を選ぶ</h2>
-          {lineOptions.length === 0 ? (
-            <p className="muted">この駅から乗れる路線がありません。</p>
-          ) : (
-            <AutocompleteInput
-              options={lineOptions}
-              placeholder="路線名で検索（例: 銀座線）"
-              onSelect={handleSelectLine}
-              emptyMessage="該当する路線がありません。"
-            />
-          )}
+          <h2>乗る路線を入力する</h2>
+          <AutocompleteInput
+            options={lineOptions}
+            placeholder="路線名を入力（例: 銀座線）"
+            onSelect={handleSelectLine}
+            emptyMessage="該当する路線がありません。"
+          />
         </div>
       ) : (
         <div className="station-picker">
@@ -165,11 +185,11 @@ export function RouteBuilderScreen({
               company={network.lines[selectedLine].company}
               color={network.lines[selectedLine].color}
             />
-            で降りる駅を選ぶ
+            で降りる駅を入力する
           </h2>
           <AutocompleteInput
             options={stationOptions}
-            placeholder="駅名で検索"
+            placeholder="駅名を入力"
             onSelect={handleAlight}
             emptyMessage="該当する駅がありません。"
             autoFocus

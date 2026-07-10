@@ -294,6 +294,18 @@
   white-space: nowrap;
 }
 
+/* 同名別駅の区別用の補足（乗り入れ路線の要約など）。ラベルの横に小さく表示する */
+.autocomplete-option-note {
+  margin-left: auto;
+  flex-shrink: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .autocomplete-empty {
   padding: 10px;
   color: var(--muted);

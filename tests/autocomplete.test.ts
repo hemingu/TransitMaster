@@ -119,4 +119,33 @@ describe('filterOptions', () => {
     const many: AutocompleteOption[] = Array.from({ length: 60 }, (_, i) => opt(i, `駅${i}`));
     expect(filterOptions(many, '駅').length).toBe(50);
   });
+
+  describe('note フィールド（同名別駅の区別用）', () => {
+    const withNotes: AutocompleteOption[] = [
+      { id: 1, label: '京橋', searchText: '京橋', note: '大阪環状線（JR西日本）ほか' },
+      { id: 2, label: '京橋', searchText: '京橋', note: '銀座線（東京メトロ）ほか' },
+      { id: 3, label: '新橋', searchText: '新橋', note: '山手線（JR東日本）ほか' },
+    ];
+
+    it('note は filterOptions の結果にそのまま保持される', () => {
+      const result = filterOptions(withNotes, '京橋');
+      expect(result.map((o) => o.id)).toEqual([1, 2]);
+      expect(result[0].note).toBe('大阪環状線（JR西日本）ほか');
+      expect(result[1].note).toBe('銀座線（東京メトロ）ほか');
+    });
+
+    it('note はマッチ対象に含めない（noteの文字列で検索してもヒットしない）', () => {
+      // '大阪環状線' は id=1 の note にのみ含まれ、searchText には含まれない
+      expect(filterOptions(withNotes, '大阪環状線')).toEqual([]);
+      // '山手線' も同様に note のみ
+      expect(filterOptions(withNotes, '山手線')).toEqual([]);
+    });
+
+    it('note が無い候補も混在できる', () => {
+      const mixed: AutocompleteOption[] = [opt(1, '東京'), ...withNotes];
+      const result = filterOptions(mixed, '東京');
+      expect(result.map((o) => o.id)).toEqual([1]);
+      expect(result[0].note).toBeUndefined();
+    });
+  });
 });

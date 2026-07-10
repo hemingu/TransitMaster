@@ -136,6 +136,7 @@ export function AutocompleteInput({
                   />
                 )}
                 <span className="autocomplete-option-label">{opt.label}</span>
+                {opt.note && <span className="autocomplete-option-note">{opt.note}</span>}
               </li>
             ))
           )}

@@ -176,6 +176,34 @@ describe('game.ts helpers with miniNetwork', () => {
       const validation = validateRoute(network, akihabaraYamanote, shinjukuYamanote, [leg1!, leg2!]);
       expect(validation).toEqual({ valid: true });
     });
+
+    it('フォールバック: 路線上にない駅はマップせず元の駅indexをそのまま使う', () => {
+      // 神田は丸ノ内線に無い。全駅候補UIでは路線上にない駅も選べるため、
+      // buildLeg は即時エラーにせず元の index を残した leg を返す。
+      const leg = buildLeg(network, marunouchi, tokyoYamanote, kandaYamanote);
+      expect(leg.line).toBe(marunouchi);
+      // from は丸ノ内線上の東京レコードへマップされる（同一グループ内に存在するため）
+      expect(leg.from).toBe(tokyoMarunouchi);
+      // to はマップ不能なので元の index のまま
+      expect(leg.to).toBe(kandaYamanote);
+    });
+
+    it('フォールバック leg は回答時に validateRoute が station-not-on-line で弾く', () => {
+      const leg = buildLeg(network, marunouchi, tokyoYamanote, kandaYamanote);
+      const validation = validateRoute(network, tokyoYamanote, kandaYamanote, [leg]);
+      expect(validation.valid).toBe(false);
+      expect(validation.reason).toBe('station-not-on-line');
+      expect(validation.legIndex).toBe(0);
+    });
+
+    it('フォールバック: from/to とも路線上に無い場合も両方とも元の index を保つ', () => {
+      // 神田・秋葉原はどちらも丸ノ内線に無い
+      const leg = buildLeg(network, marunouchi, kandaYamanote, akihabaraYamanote);
+      expect(leg).toEqual({ line: marunouchi, from: kandaYamanote, to: akihabaraYamanote });
+      const validation = validateRoute(network, kandaYamanote, akihabaraYamanote, [leg]);
+      expect(validation.valid).toBe(false);
+      expect(validation.reason).toBe('station-not-on-line');
+    });
   });
 
   describe('reasonMessage', () => {
