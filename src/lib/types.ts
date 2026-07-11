@@ -19,6 +19,16 @@ export interface Station {
   lon: number;
   /** 同一の物理駅（乗換可能な駅群）を束ねるグループID。異なる路線の同名・近傍駅は同じgroupを共有する。 */
   group: number;
+  /**
+   * 都道府県コード（駅データ.jp の pref_cd、1〜47）。
+   * N02由来の新幹線単独駅などで判定できない場合は 0（不明）とし、UI側は都道府県表示をスキップする。
+   */
+  pref: number;
+  /**
+   * 駅名ふりがな（カタカナ。駅データ.jp の station_name_k が非空の場合のみ設定）。
+   * 未収録の間は undefined（JSON では省略されるためサイズ増なし）。オートコンプリートの検索対象に使う。
+   */
+  kana?: string;
 }
 
 /**
@@ -50,6 +60,11 @@ export interface Line {
   lineType: number;
   /** この路線が持つ停車パターン（系統）の一覧。 */
   patterns: Pattern[];
+  /**
+   * 路線名ふりがな（カタカナ。駅データ.jp の line_name_k が非空の場合のみ設定）。
+   * 未収録の間は undefined（JSON では省略されるためサイズ増なし）。オートコンプリートの検索対象に使う。
+   */
+  kana?: string;
 }
 
 /** ネットワーク全体。formatVersion は将来の破壊的変更を検知するためのマーカー。 */

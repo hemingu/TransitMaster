@@ -677,12 +677,13 @@ interface N02MergeResult {
 
 /**
  * N02（国土数値情報）から新幹線区間・駅を取り込み、Line群と追加すべきStation群を作る。
- * ekidata側の駅グループ（groupByStationName: 正規化駅名 -> {group, lat, lon}[]）と
+ * ekidata側の駅グループ（groupByStationName: 正規化駅名 -> {group, lat, lon, pref}[]）と
  * 名前一致＋距離1km以内で統合する。統合できない場合は新規groupを割り当てる。
+ * pref（都道府県コード）は統合先の在来駅から引き継ぎ、新規group（近傍在来駅なし）は 0（不明）とする。
  */
 function mergeN02(
   n02: N02Input,
-  ekidataGroupsByName: Map<string, { group: number; lat: number; lon: number }[]>,
+  ekidataGroupsByName: Map<string, { group: number; lat: number; lon: number; pref: number }[]>,
   nextGroupIdRef: { value: number },
   log: string[]
 ): N02MergeResult {
@@ -785,6 +786,8 @@ function mergeN02(
     for (const p of projected) {
       const normName = normalizeStationName(p.name);
       let assignedGroup: number | null = null;
+      // 統合先の在来駅から引き継ぐ都道府県コード（統合できなければ 0=不明のまま）
+      let assignedPref = 0;
 
       if (GROUP_OVERRIDES[p.name] !== undefined) {
         // GROUP_OVERRIDES は station_g_cd 文字列を指すため、ekidata側の該当グループ番号解決は
@@ -793,6 +796,7 @@ function mergeN02(
         const override = ekidataGroupsByName.get(normalizeStationName(GROUP_OVERRIDES[p.name]));
         if (override && override.length > 0) {
           assignedGroup = override[0].group;
+          assignedPref = override[0].pref;
         }
       }
 
@@ -803,6 +807,7 @@ function mergeN02(
             const distM = haversineMeters(p.mid.lat, p.mid.lon, cand.lat, cand.lon);
             if (distM <= N02_GROUP_MERGE_DISTANCE_M) {
               assignedGroup = cand.group;
+              assignedPref = cand.pref;
               break;
             }
           }
@@ -812,15 +817,27 @@ function mergeN02(
       let stationIdxInAddList: number;
       if (assignedGroup !== null) {
         stationIdxInAddList = stationsToAdd.length;
-        stationsToAdd.push({ name: p.name, lat: p.mid.lat, lon: p.mid.lon, group: assignedGroup });
+        stationsToAdd.push({
+          name: p.name,
+          lat: p.mid.lat,
+          lon: p.mid.lon,
+          group: assignedGroup,
+          pref: assignedPref,
+        });
         groupAssignments.set(stationIdxInAddList, assignedGroup);
         log.push(`N02駅統合: 「${p.name}」(N02) -> 既存group ${assignedGroup}（ekidata側と1km以内一致）`);
       } else {
         const newGroup = nextGroupIdRef.value++;
         stationIdxInAddList = stationsToAdd.length;
-        stationsToAdd.push({ name: p.name, lat: p.mid.lat, lon: p.mid.lon, group: newGroup });
+        stationsToAdd.push({
+          name: p.name,
+          lat: p.mid.lat,
+          lon: p.mid.lon,
+          group: newGroup,
+          pref: 0,
+        });
         groupAssignments.set(stationIdxInAddList, newGroup);
-        log.push(`N02駅統合: 「${p.name}」(N02) -> 新規group ${newGroup}（ekidata側に一致なし）`);
+        log.push(`N02駅統合: 「${p.name}」(N02) -> 新規group ${newGroup}（ekidata側に一致なし・pref不明）`);
       }
       stopStationIndices.push(stationIdxInAddList);
     }
@@ -942,7 +959,14 @@ export function buildEkidataNetwork(
     idx = stations.length;
     const lat = parseFloat(rec.lat);
     const lon = parseFloat(rec.lon);
-    stations.push({ name: rec.station_name, lat, lon, group: gid });
+    // pref_cd（都道府県コード 1〜47）。パース不能なら 0（不明）。
+    const prefParsed = parseInt(rec.pref_cd ?? '', 10);
+    const pref = Number.isInteger(prefParsed) && prefParsed >= 1 && prefParsed <= 47 ? prefParsed : 0;
+    // station_name_k（駅名カナ）は非空の場合のみ載せる（JSONではundefined省略でサイズ増なし）
+    const kana = rec.station_name_k?.trim();
+    const station: Station = { name: rec.station_name, lat, lon, group: gid, pref };
+    if (kana) station.kana = kana;
+    stations.push(station);
     globalIndexByStationCd.set(stationCd, idx);
     const arr = groupCoords.get(gid) ?? [];
     arr.push({ lat, lon, name: rec.station_name });
@@ -1021,13 +1045,17 @@ export function buildEkidataNetwork(
     const colorRaw = lineRec.line_color_c?.trim();
     const color = colorRaw ? colorRaw.replace(/^#/, '') : null;
 
-    lines.push({
+    // line_name_k（路線名カナ）は非空の場合のみ載せる（JSONではundefined省略でサイズ増なし）
+    const lineKana = lineRec.line_name_k?.trim();
+    const line: Line = {
       name: lineRec.line_name,
       company: companyRec.company_name,
       color,
       lineType,
       patterns: patternsForLine,
-    });
+    };
+    if (lineKana) line.kana = lineKana;
+    lines.push(line);
   }
 
   // グループ内最大距離チェック
@@ -1049,12 +1077,15 @@ export function buildEkidataNetwork(
 
   // ---- N02新幹線マージ ----
   if (n02 !== null) {
-    const ekidataGroupsByName = new Map<string, { group: number; lat: number; lon: number }[]>();
+    const ekidataGroupsByName = new Map<
+      string,
+      { group: number; lat: number; lon: number; pref: number }[]
+    >();
     stations.forEach((s, idx) => {
       void idx;
       const norm = normalizeStationName(s.name);
       const arr = ekidataGroupsByName.get(norm) ?? [];
-      arr.push({ group: s.group, lat: s.lat, lon: s.lon });
+      arr.push({ group: s.group, lat: s.lat, lon: s.lon, pref: s.pref });
       ekidataGroupsByName.set(norm, arr);
     });
 

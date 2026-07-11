@@ -115,30 +115,32 @@ const G_NISHIOKA = 14;
 
 /** 手組みの Network v2 を返す（ビルドパイプラインを介さない）。 */
 export function miniNetwork(): Network {
+  // pref は全駅とも 13（東京都）。東京（グループ代表 index 0）のみカナを収録し、
+  // カナ検索（カタカナ・ひらがな）のテストに使う。他の駅はカナ未収録（undefined）のまま。
   const stations: Station[] = [
-    { name: '東京', lat: 35.681, lon: 139.767, group: G_TOKYO }, // 0 yamanote
-    { name: '東京', lat: 35.681, lon: 139.767, group: G_TOKYO }, // 1 chuo
-    { name: '東京', lat: 35.681, lon: 139.767, group: G_TOKYO }, // 2 marunouchi
-    { name: '神田', lat: 35.6917, lon: 139.7708, group: G_KANDA }, // 3
-    { name: '秋葉原', lat: 35.6984, lon: 139.7731, group: G_AKIHABARA }, // 4
-    { name: '上野', lat: 35.7138, lon: 139.777, group: G_UENO }, // 5
-    { name: '池袋', lat: 35.7289, lon: 139.71, group: G_IKEBUKURO }, // 6 yamanote
-    { name: '池袋', lat: 35.7289, lon: 139.71, group: G_IKEBUKURO }, // 7 marunouchi
-    { name: '新宿', lat: 35.69, lon: 139.7004, group: G_SHINJUKU }, // 8 yamanote
-    { name: '新宿', lat: 35.69, lon: 139.7004, group: G_SHINJUKU }, // 9 chuo
-    { name: '新宿', lat: 35.69, lon: 139.7004, group: G_SHINJUKU }, // 10 marunouchi
-    { name: '新宿', lat: 35.69, lon: 139.7004, group: G_SHINJUKU }, // 11 testtetsu
-    { name: '渋谷', lat: 35.658, lon: 139.7016, group: G_SHIBUYA }, // 12
-    { name: '品川', lat: 35.6285, lon: 139.7387, group: G_SHINAGAWA }, // 13
-    { name: '御茶ノ水', lat: 35.6993, lon: 139.7649, group: G_OCHANOMIZU }, // 14 chuo
-    { name: '御茶ノ水', lat: 35.6993, lon: 139.7649, group: G_OCHANOMIZU }, // 15 marunouchi
-    { name: '大手町', lat: 35.6867, lon: 139.7649, group: G_OTEMACHI }, // 16
-    { name: '四ツ谷', lat: 35.686, lon: 139.73, group: G_YOTSUYA }, // 17 chuo
-    { name: '四ツ谷', lat: 35.686, lon: 139.73, group: G_YOTSUYA }, // 18 marunouchi
-    { name: '初台', lat: 35.6822, lon: 139.6875, group: G_HATSUDAI }, // 19
-    { name: '本村', lat: 35.675, lon: 139.68, group: G_HONMURA }, // 20
-    { name: '東山', lat: 35.67, lon: 139.67, group: G_HIGASHIYAMA }, // 21
-    { name: '西丘', lat: 35.68, lon: 139.66, group: G_NISHIOKA }, // 22
+    { name: '東京', lat: 35.681, lon: 139.767, group: G_TOKYO, pref: 13, kana: 'トウキョウ' }, // 0 yamanote
+    { name: '東京', lat: 35.681, lon: 139.767, group: G_TOKYO, pref: 13 }, // 1 chuo
+    { name: '東京', lat: 35.681, lon: 139.767, group: G_TOKYO, pref: 13 }, // 2 marunouchi
+    { name: '神田', lat: 35.6917, lon: 139.7708, group: G_KANDA, pref: 13 }, // 3
+    { name: '秋葉原', lat: 35.6984, lon: 139.7731, group: G_AKIHABARA, pref: 13 }, // 4
+    { name: '上野', lat: 35.7138, lon: 139.777, group: G_UENO, pref: 13 }, // 5
+    { name: '池袋', lat: 35.7289, lon: 139.71, group: G_IKEBUKURO, pref: 13 }, // 6 yamanote
+    { name: '池袋', lat: 35.7289, lon: 139.71, group: G_IKEBUKURO, pref: 13 }, // 7 marunouchi
+    { name: '新宿', lat: 35.69, lon: 139.7004, group: G_SHINJUKU, pref: 13 }, // 8 yamanote
+    { name: '新宿', lat: 35.69, lon: 139.7004, group: G_SHINJUKU, pref: 13 }, // 9 chuo
+    { name: '新宿', lat: 35.69, lon: 139.7004, group: G_SHINJUKU, pref: 13 }, // 10 marunouchi
+    { name: '新宿', lat: 35.69, lon: 139.7004, group: G_SHINJUKU, pref: 13 }, // 11 testtetsu
+    { name: '渋谷', lat: 35.658, lon: 139.7016, group: G_SHIBUYA, pref: 13 }, // 12
+    { name: '品川', lat: 35.6285, lon: 139.7387, group: G_SHINAGAWA, pref: 13 }, // 13
+    { name: '御茶ノ水', lat: 35.6993, lon: 139.7649, group: G_OCHANOMIZU, pref: 13 }, // 14 chuo
+    { name: '御茶ノ水', lat: 35.6993, lon: 139.7649, group: G_OCHANOMIZU, pref: 13 }, // 15 marunouchi
+    { name: '大手町', lat: 35.6867, lon: 139.7649, group: G_OTEMACHI, pref: 13 }, // 16
+    { name: '四ツ谷', lat: 35.686, lon: 139.73, group: G_YOTSUYA, pref: 13 }, // 17 chuo
+    { name: '四ツ谷', lat: 35.686, lon: 139.73, group: G_YOTSUYA, pref: 13 }, // 18 marunouchi
+    { name: '初台', lat: 35.6822, lon: 139.6875, group: G_HATSUDAI, pref: 13 }, // 19
+    { name: '本村', lat: 35.675, lon: 139.68, group: G_HONMURA, pref: 13 }, // 20
+    { name: '東山', lat: 35.67, lon: 139.67, group: G_HIGASHIYAMA, pref: 13 }, // 21
+    { name: '西丘', lat: 35.68, lon: 139.66, group: G_NISHIOKA, pref: 13 }, // 22
   ];
 
   const yamanotePattern: Pattern = {
@@ -194,6 +196,8 @@ export function miniNetwork(): Network {
       color: '9ACD32',
       lineType: 2,
       patterns: [yamanotePattern],
+      // カナ検索テスト用（他の路線はカナ未収録のまま）
+      kana: 'ヤマノテセン',
     },
     {
       name: '中央線',
@@ -277,13 +281,14 @@ function lineRow(
   line_cd: string,
   company_cd: string,
   line_name: string,
-  line_color_c: string
+  line_color_c: string,
+  line_name_k = ''
 ): Record<string, string> {
   return {
     line_cd,
     company_cd,
     line_name,
-    line_name_k: '',
+    line_name_k,
     line_name_h: '',
     line_color_c,
     line_color_t: '',
@@ -303,16 +308,18 @@ function stationRow(
   line_cd: string,
   lon: number,
   lat: number,
-  e_status: string
+  e_status: string,
+  station_name_k = '',
+  pref_cd = '13'
 ): Record<string, string> {
   return {
     station_cd,
     station_g_cd,
     station_name,
-    station_name_k: '',
+    station_name_k,
     station_name_r: '',
     line_cd,
-    pref_cd: '13',
+    pref_cd,
     post: '',
     address: '',
     lon: String(lon),
@@ -336,7 +343,9 @@ function joinRow(line_cd: string, station_cd1: string, station_cd2: string): Rec
  * - 廃駅テスト用に e_status='2' の駅1つと、それを参照する join 行。
  * - どの join にも現れない孤立駅1つ（e_status='0'）。
  * - 山手線の join は環状（品川-東京を閉じる）。
- * - カナ列・line_type は空文字（無料版に無いため）。
+ * - line_type は空文字（無料版に無いため）。
+ * - カナ列は山手線の line_name_k と東京(YMN01)の station_name_k のみ設定（取り込みテスト用）。
+ * - pref_cd は全駅 '13'（東京都）。
  * - line_color_c は山手線・中央線・丸ノ内線のみ設定、テスト電鉄は空。
  */
 export function miniEkidataInput(): MiniEkidataInput {
@@ -347,7 +356,8 @@ export function miniEkidataInput(): MiniEkidataInput {
   ];
 
   const lines = [
-    lineRow('10001', '1', '山手線', '9ACD32'),
+    // 山手線のみ line_name_k を設定（カナ取り込みテスト用。他は空文字＝未収録）
+    lineRow('10001', '1', '山手線', '9ACD32', 'ヤマノテセン'),
     lineRow('10002', '1', '中央線', 'F15A22'),
     lineRow('20001', '2', '丸ノ内線', 'F62E36'),
     lineRow('30001', '3', 'テスト電鉄本線', ''),
@@ -373,8 +383,8 @@ export function miniEkidataInput(): MiniEkidataInput {
   };
 
   const stations: Record<string, string>[] = [
-    // 山手線 (line_cd 10001)
-    stationRow('YMN01', G.tokyo, '東京', '10001', 139.767, 35.681, '0'),
+    // 山手線 (line_cd 10001)。東京のみ station_name_k を設定（カナ取り込みテスト用）
+    stationRow('YMN01', G.tokyo, '東京', '10001', 139.767, 35.681, '0', 'トウキョウ'),
     stationRow('YMN02', G.kanda, '神田', '10001', 139.7708, 35.6917, '0'),
     stationRow('YMN03', G.akihabara, '秋葉原', '10001', 139.7731, 35.6984, '0'),
     stationRow('YMN04', G.ueno, '上野', '10001', 139.777, 35.7138, '0'),

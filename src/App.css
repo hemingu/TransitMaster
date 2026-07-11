@@ -339,6 +339,12 @@
   background: linear-gradient(135deg, var(--success-bg), rgba(255, 215, 0, 0.12));
 }
 
+/* 「おしい！」（close判定）: オレンジ系 */
+.result-card.close {
+  border-color: #e8912d;
+  background: rgba(232, 145, 45, 0.12);
+}
+
 .result-card.incorrect {
   border-color: var(--danger);
   background: var(--danger-bg);

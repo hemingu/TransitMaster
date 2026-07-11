@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   filterOptions,
+  kataToHira,
   normalizeQuery,
   type AutocompleteOption,
 } from '../src/lib/autocomplete.ts';
@@ -29,6 +30,33 @@ describe('normalizeQuery', () => {
 
   it('空文字はそのまま空文字になる', () => {
     expect(normalizeQuery('')).toBe('');
+  });
+});
+
+describe('kataToHira', () => {
+  it('カタカナをひらがなに変換する', () => {
+    expect(kataToHira('トウキョウ')).toBe('とうきょう');
+    expect(kataToHira('ヤマノテセン')).toBe('やまのてせん');
+  });
+
+  it('カタカナ以外（漢字・英数・ひらがな）はそのまま', () => {
+    expect(kataToHira('JR山手線やまのて')).toBe('JR山手線やまのて');
+    expect(kataToHira('東京メトロ')).toBe('東京めとろ');
+  });
+
+  it('濁点付き・小書き文字も変換される', () => {
+    expect(kataToHira('ギンザ')).toBe('ぎんざ');
+    expect(kataToHira('シャシュショ')).toBe('しゃしゅしょ');
+  });
+
+  it('カナ入り searchText と組み合わせるとひらがな・カタカナ両方の入力でヒットする', () => {
+    const kana = 'トウキョウ';
+    const options: AutocompleteOption[] = [
+      { id: 1, label: '東京', searchText: `東京 ${kana} ${kataToHira(kana)}` },
+    ];
+    expect(filterOptions(options, 'トウキョウ').map((o) => o.id)).toEqual([1]);
+    expect(filterOptions(options, 'とうきょう').map((o) => o.id)).toEqual([1]);
+    expect(filterOptions(options, '東京').map((o) => o.id)).toEqual([1]);
   });
 });
 

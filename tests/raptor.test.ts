@@ -123,7 +123,7 @@ describe('searchRoute', () => {
   it('到達不能な駅（孤立駅）へは null を返す', () => {
     const isolatedStations: Station[] = [
       ...miniNetwork().stations,
-      { name: '孤立駅', lat: 0, lon: 0, group: 999 },
+      { name: '孤立駅', lat: 0, lon: 0, group: 999, pref: 0 },
     ];
     const isolatedLines: Line[] = miniNetwork().lines; // 孤立駅を参照するパターンは存在しない
     const isolatedNetwork: Network = {

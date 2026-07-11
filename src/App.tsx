@@ -161,8 +161,6 @@ function App() {
     const evaluation = evaluateRoute(network, legs);
     setAnswerResult({ valid: true, evaluation });
     setTotalAnswered((n) => n + 1);
-    setTotalCorrect((n) => n + 1);
-    setStreak((n) => n + 1);
     setScreen('result');
 
     setReferenceLoading(true);
@@ -170,7 +168,15 @@ function App() {
     setJudgement(null);
     const itinerary = await search(question.origin, question.destination, mode);
     setReference(itinerary);
-    setJudgement(judgeAnswer(mode, evaluation, itinerary));
+    const judged = judgeAnswer(mode, evaluation, itinerary);
+    setJudgement(judged);
+    // 「正解」はパーフェクト（模範解答と同等以下）のみ。close/miss は連続正解をリセットする
+    if (judged.level === 'perfect') {
+      setTotalCorrect((n) => n + 1);
+      setStreak((n) => n + 1);
+    } else {
+      setStreak(0);
+    }
     setReferenceLoading(false);
   }
 

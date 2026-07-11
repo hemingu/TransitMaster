@@ -30,6 +30,16 @@ export function normalizeQuery(s: string): string {
 }
 
 /**
+ * カタカナをひらがなに変換する（U+30A1〜U+30F6 を -0x60 シフト。他の文字はそのまま）。
+ * normalizeQuery の NFKC ではカタカナ/ひらがなは同一視されないため、
+ * カタカナ収録のふりがなをひらがな入力でもヒットさせたい場合は、
+ * searchText 構築時にこの関数で変換した文字列も連結しておく。
+ */
+export function kataToHira(s: string): string {
+  return s.replace(/[ァ-ヶ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+}
+
+/**
  * 候補一覧をクエリで部分一致フィルタする。
  *
  * - query が空文字なら、options の先頭から maxResults 件をそのまま返す。

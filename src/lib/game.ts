@@ -1,5 +1,7 @@
 import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from './types.ts';
 import { getNetworkIndex } from './networkIndex.ts';
+import { kataToHira, type AutocompleteOption } from './autocomplete.ts';
+import { prefName } from './prefNames.ts';
 
 /** difficulty -> generateQuestion の乗換回数レンジ */
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -62,6 +64,61 @@ export function formatLineName(network: Network, lineIdx: number): string {
   const line = network.lines[lineIdx];
   if (!line) return '不明な路線';
   return `${line.name}（${line.company}）`;
+}
+
+/**
+ * 路線オートコンプリートの候補一覧（全路線）を構築する。
+ * label は「路線名（事業者名）」、searchText はふりがな（カナ）があればカタカナ・ひらがな両方を連結して
+ * カナ入力でもヒットするようにする。badge は LineBadge 表示用。
+ */
+export function buildLineOptions(network: Network): AutocompleteOption[] {
+  return network.lines.map((line, lineIdx) => {
+    const label = formatLineName(network, lineIdx);
+    const searchText = line.kana ? `${label} ${line.kana} ${kataToHira(line.kana)}` : label;
+    return {
+      id: lineIdx,
+      label,
+      searchText,
+      badge: { name: line.name, company: line.company, color: line.color },
+    };
+  });
+}
+
+/**
+ * 降車駅オートコンプリートの候補一覧（全駅をグループ＝物理駅単位で重複排除）を構築する。
+ * - id はグループ代表（stations 配列で最初に出現する駅index）
+ * - searchText はふりがな（カナ）があればカタカナ・ひらがな両方を連結
+ * - 同じ駅名が複数グループに存在する場合（例: 大阪と東京の京橋）に限り、
+ *   note に都道府県名を添えて区別できるようにする（pref=0 等で判定不能なら表示しない）
+ */
+export function buildStationOptions(network: Network): AutocompleteOption[] {
+  const seenGroups = new Set<number>();
+  const representatives: { stationIdx: number; name: string; kana?: string; pref: number }[] = [];
+  const groupCountByName = new Map<string, number>();
+
+  network.stations.forEach((station, stationIdx) => {
+    if (seenGroups.has(station.group)) return;
+    seenGroups.add(station.group);
+    representatives.push({
+      stationIdx,
+      name: station.name,
+      kana: station.kana,
+      pref: station.pref,
+    });
+    groupCountByName.set(station.name, (groupCountByName.get(station.name) ?? 0) + 1);
+  });
+
+  return representatives.map((rep) => {
+    const searchText = rep.kana ? `${rep.name} ${rep.kana} ${kataToHira(rep.kana)}` : rep.name;
+    const option: AutocompleteOption = { id: rep.stationIdx, label: rep.name, searchText };
+    if ((groupCountByName.get(rep.name) ?? 0) >= 2) {
+      const pref = prefName(rep.pref);
+      if (pref !== null) {
+        option.note = pref;
+      }
+    }
+    return option;
+  });
 }
 
 /** 指定駅（グループ）を通る路線のインデックス一覧を重複なく返す */
@@ -204,7 +261,7 @@ export function reasonMessage(
   }
 }
 
-export type JudgementLevel = 'perfect' | 'good' | 'invalid';
+export type JudgementLevel = 'perfect' | 'close' | 'miss' | 'invalid';
 
 export interface Judgement {
   level: JudgementLevel;
@@ -213,14 +270,18 @@ export interface Judgement {
 
 /**
  * ユーザーの解答評価（evaluateRoute の結果）と模範解答（Itinerary、無ければ null）を
- * 選択中の AnswerMode の指標で比較し、パーフェクト／正解の判定を行う。
+ * 選択中の AnswerMode の指標で比較し、3段階（perfect / close / miss）で判定する。
+ * 「正解」はパーフェクト（模範解答と同等以下）のみ。それ以外は超過の度合いに応じて
+ * 「おしい！」（close）か「不正解…」（miss）になる。
  *
- * パーフェクト条件:
- * - mode='transfers': ユーザーの乗換回数 <= 模範解答の乗換回数
- * - mode='time'      : ユーザーの総所要秒 <= 模範解答の総所要秒 * 1.1（±10%以内）
- *   上記を満たさない場合は「正解（模範解答は○○）」の good 判定。
+ * - mode='time'（ratio = evaluation.totalSec / reference.totalSec）:
+ *   ratio <= 1.0 -> perfect、ratio <= 1.1 -> close、ratio > 1.1 -> miss。
+ *   totalSec が算出不能（null）なら miss。
+ * - mode='transfers'（diff = evaluation.transfers - reference.transfers）:
+ *   diff <= 0 -> perfect、diff === 1 -> close、diff >= 2 -> miss。
  *
- * 模範解答が見つからない（reference === null）場合は比較のしようがないため good 判定にする。
+ * 模範解答が見つからない（reference === null）場合は比較のしようがないため perfect 扱い。
+ * 経路自体が無効な場合（invalid）はこの関数を通らず reasonMessage で理由を表示する。
  */
 export function judgeAnswer(
   mode: AnswerMode,
@@ -229,33 +290,54 @@ export function judgeAnswer(
 ): Judgement {
   if (reference === null) {
     // 模範解答が無い（探索不能）場合は比較のしようがないため正解扱いとする
-    return { level: 'good', message: '正解！（模範解答は見つかりませんでした）' };
+    return { level: 'perfect', message: '模範解答が見つからなかったため正解扱いです' };
   }
 
   if (mode === 'transfers') {
-    const isPerfect = evaluation.transfers <= reference.transfers;
-    return isPerfect
-      ? { level: 'perfect', message: 'パーフェクト！（模範解答と同じかそれ以下の乗換回数です）' }
-      : {
-          level: 'good',
-          message: `正解！（模範解答は乗換${reference.transfers}回でした）`,
-        };
+    const refTransfers = reference.transfers;
+    const diff = evaluation.transfers - refTransfers;
+    if (diff <= 0) {
+      return {
+        level: 'perfect',
+        message: `パーフェクト！最少の乗換回数です（乗換${refTransfers}回）`,
+      };
+    }
+    if (diff === 1) {
+      return {
+        level: 'close',
+        message: `おしい！模範解答より乗換1回多い経路です（模範解答: 乗換${refTransfers}回）`,
+      };
+    }
+    return { level: 'miss', message: `不正解… 模範解答は乗換${refTransfers}回でした` };
   }
 
   // mode === 'time'
+  const refDuration = formatEstimatedDuration(reference.totalSec);
   if (evaluation.totalSec === null) {
     return {
-      level: 'good',
-      message: `正解！（模範解答は${formatEstimatedDuration(reference.totalSec)}でした）`,
+      level: 'miss',
+      message: `所要時間を算出できませんでした（模範解答: ${refDuration}）`,
     };
   }
-  const isPerfect = evaluation.totalSec <= reference.totalSec * 1.1;
-  return isPerfect
-    ? { level: 'perfect', message: 'パーフェクト！（模範解答とほぼ同じ所要時間です）' }
-    : {
-        level: 'good',
-        message: `正解！（模範解答は${formatEstimatedDuration(reference.totalSec)}でした）`,
-      };
+  const ratio = evaluation.totalSec / reference.totalSec;
+  if (ratio <= 1.0) {
+    return {
+      level: 'perfect',
+      message: `パーフェクト！模範解答と同じ所要時間です（${refDuration}）`,
+    };
+  }
+  // 超過率（%）。四捨五入で0%になる僅かな超過も「おしい」と表現できるよう最低1%とする
+  const percent = Math.max(1, Math.round((ratio - 1) * 100));
+  if (ratio <= 1.1) {
+    return {
+      level: 'close',
+      message: `おしい！模範解答より約${percent}%長い経路です（模範解答: ${refDuration}）`,
+    };
+  }
+  return {
+    level: 'miss',
+    message: `不正解… 模範解答より約${percent}%長い経路です（模範解答: ${refDuration}）`,
+  };
 }
 
 /** 組み立て中の経路を表示用文字列に変換する（例: "山手線（JR東日本） 東京→上野 ｜ 丸ノ内線（東京メトロ） 上野→新宿"） */

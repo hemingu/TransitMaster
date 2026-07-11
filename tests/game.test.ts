@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateRoute, validateRoute } from '../src/lib/validate.ts';
+import { filterOptions } from '../src/lib/autocomplete.ts';
 import { miniNetwork } from './fixtures/miniEkidata.ts';
 import type { Itinerary, Network, RouteLeg } from '../src/lib/types.ts';
 import {
   buildLeg,
+  buildLineOptions,
+  buildStationOptions,
   difficultyToTransferRange,
   filterStationsByQuery,
   formatDuration,
@@ -206,6 +209,83 @@ describe('game.ts helpers with miniNetwork', () => {
     });
   });
 
+  describe('buildLineOptions（路線オートコンプリート候補）', () => {
+    const options = buildLineOptions(network);
+
+    it('全路線が候補になり、labelは「路線名（事業者名）」形式', () => {
+      expect(options.length).toBe(network.lines.length);
+      const yamanoteOpt = options.find((o) => o.label === '山手線（JR東日本）');
+      expect(yamanoteOpt).toBeDefined();
+      expect(yamanoteOpt!.badge).toEqual({ name: '山手線', company: 'JR東日本', color: '9ACD32' });
+    });
+
+    it('カナ（カタカナ）でヒットする', () => {
+      const result = filterOptions(options, 'ヤマノテ');
+      expect(result.map((o) => o.label)).toContain('山手線（JR東日本）');
+    });
+
+    it('ひらがな入力でもヒットする（searchTextにカタカナ→ひらがな変換を連結済み）', () => {
+      const result = filterOptions(options, 'やまのてせん');
+      expect(result.map((o) => o.label)).toContain('山手線（JR東日本）');
+    });
+
+    it('カナ未収録の路線は路線名のみで検索できる', () => {
+      const result = filterOptions(options, '中央');
+      expect(result.map((o) => o.label)).toContain('中央線（JR東日本）');
+    });
+  });
+
+  describe('buildStationOptions（駅オートコンプリート候補）', () => {
+    const options = buildStationOptions(network);
+
+    it('グループ（物理駅）単位で重複排除される', () => {
+      const uniqueGroups = new Set(network.stations.map((s) => s.group));
+      expect(options.length).toBe(uniqueGroups.size);
+      // 東京は3レコードあるが候補は1つ
+      expect(options.filter((o) => o.label === '東京').length).toBe(1);
+    });
+
+    it('カナ（カタカナ・ひらがな）でヒットする', () => {
+      expect(filterOptions(options, 'トウキョウ').map((o) => o.label)).toContain('東京');
+      expect(filterOptions(options, 'とうきょう').map((o) => o.label)).toContain('東京');
+    });
+
+    it('駅名が一意なら note（都道府県名）は付かない', () => {
+      // miniNetworkの駅名はグループ単位ではすべて一意
+      for (const o of options) {
+        expect(o.note).toBeUndefined();
+      }
+    });
+
+    it('同名別駅（複数グループに同じ駅名）のみ note に都道府県名が付く', () => {
+      // 大阪の京橋(pref=27)と東京の京橋(pref=13)、一意な桜島、pref不明(0)の同名駅ペア
+      const dupNetwork: Network = {
+        formatVersion: 2,
+        stations: [
+          { name: '京橋', lat: 34.6966, lon: 135.5344, group: 0, pref: 27 },
+          { name: '京橋', lat: 35.6767, lon: 139.7701, group: 1, pref: 13 },
+          { name: '桜島', lat: 34.6656, lon: 135.4384, group: 2, pref: 27 },
+          { name: '謎駅', lat: 0, lon: 0, group: 3, pref: 0 },
+          { name: '謎駅', lat: 1, lon: 1, group: 4, pref: 13 },
+        ],
+        lines: [],
+        transferSec: 300,
+      };
+      const dupOptions = buildStationOptions(dupNetwork);
+
+      const kyobashi = dupOptions.filter((o) => o.label === '京橋');
+      expect(kyobashi.map((o) => o.note)).toEqual(['大阪府', '東京都']);
+
+      // 一意な駅名は note なし
+      expect(dupOptions.find((o) => o.label === '桜島')!.note).toBeUndefined();
+
+      // 同名でも pref=0（不明）の方は note をスキップ、判明している方のみ表示
+      const nazo = dupOptions.filter((o) => o.label === '謎駅');
+      expect(nazo[0].note).toBeUndefined();
+      expect(nazo[1].note).toBe('東京都');
+    });
+  });
+
   describe('reasonMessage', () => {
     it('station-not-on-line: 具体的な駅名と路線名（事業者名込み）を含む', () => {
       const legs: RouteLeg[] = [{ line: yamanote, from: tokyoYamanote, to: shinjukuChuo }];
@@ -249,68 +329,111 @@ describe('game.ts helpers with miniNetwork', () => {
   });
 
   describe('judgeAnswer: time モード', () => {
-    it('ちょうど1.1倍は perfect になる', () => {
-      const reference: Itinerary = {
-        legs: [],
-        rideSec: 1000,
-        totalSec: 1000,
-        transfers: 0,
-      };
-      const evaluation = { transfers: 0, rideSec: 1100, totalSec: 1100 };
+    const reference: Itinerary = {
+      legs: [],
+      rideSec: 1000,
+      totalSec: 1000,
+      transfers: 0,
+    };
+
+    it('模範解答と同じ所要時間（ratio=1.0）は perfect になる', () => {
+      const evaluation = { transfers: 0, rideSec: 1000, totalSec: 1000 };
       const judgement = judgeAnswer('time', evaluation, reference);
       expect(judgement.level).toBe('perfect');
-    });
-
-    it('1.1倍を超えると good になり、模範解答の推定時間を含む', () => {
-      const reference: Itinerary = {
-        legs: [],
-        rideSec: 1000,
-        totalSec: 1000,
-        transfers: 0,
-      };
-      const evaluation = { transfers: 0, rideSec: 1101, totalSec: 1101 };
-      const judgement = judgeAnswer('time', evaluation, reference);
-      expect(judgement.level).toBe('good');
+      expect(judgement.message).toContain('パーフェクト');
       expect(judgement.message).toContain(formatEstimatedDuration(reference.totalSec));
     });
 
-    it('evaluationのtotalSecがnullなら good になる', () => {
-      const reference: Itinerary = { legs: [], rideSec: 1000, totalSec: 1000, transfers: 0 };
+    it('模範解答より短い（ratio<1.0）場合も perfect になる', () => {
+      const evaluation = { transfers: 0, rideSec: 900, totalSec: 900 };
+      expect(judgeAnswer('time', evaluation, reference).level).toBe('perfect');
+    });
+
+    it('1.05倍は close（おしい）になり、超過率を含む', () => {
+      const evaluation = { transfers: 0, rideSec: 1050, totalSec: 1050 };
+      const judgement = judgeAnswer('time', evaluation, reference);
+      expect(judgement.level).toBe('close');
+      expect(judgement.message).toContain('おしい');
+      expect(judgement.message).toContain('約5%');
+      expect(judgement.message).toContain(formatEstimatedDuration(reference.totalSec));
+    });
+
+    it('ちょうど1.1倍は close になる（境界は close 側）', () => {
+      const evaluation = { transfers: 0, rideSec: 1100, totalSec: 1100 };
+      const judgement = judgeAnswer('time', evaluation, reference);
+      expect(judgement.level).toBe('close');
+      expect(judgement.message).toContain('約10%');
+    });
+
+    it('1.11倍は miss（不正解）になる', () => {
+      const evaluation = { transfers: 0, rideSec: 1110, totalSec: 1110 };
+      const judgement = judgeAnswer('time', evaluation, reference);
+      expect(judgement.level).toBe('miss');
+      expect(judgement.message).toContain('不正解');
+      expect(judgement.message).toContain('約11%');
+      expect(judgement.message).toContain(formatEstimatedDuration(reference.totalSec));
+    });
+
+    it('僅かな超過でも超過率は最低1%と表示される', () => {
+      // ratio = 1.001 -> Math.round((ratio-1)*100) = 0 だが最低1%に切り上げ
+      const evaluation = { transfers: 0, rideSec: 1001, totalSec: 1001 };
+      const judgement = judgeAnswer('time', evaluation, reference);
+      expect(judgement.level).toBe('close');
+      expect(judgement.message).toContain('約1%');
+    });
+
+    it('evaluationのtotalSecがnullなら miss になる', () => {
       const evaluation = { transfers: 0, rideSec: 0, totalSec: null };
       const judgement = judgeAnswer('time', evaluation, reference);
-      expect(judgement.level).toBe('good');
+      expect(judgement.level).toBe('miss');
+      expect(judgement.message).toContain('所要時間を算出できませんでした');
+      expect(judgement.message).toContain(formatEstimatedDuration(reference.totalSec));
     });
   });
 
   describe('judgeAnswer: transfers モード', () => {
-    it('同数なら perfect になる', () => {
+    it('同数（diff=0）なら perfect になる', () => {
       const reference: Itinerary = { legs: [], rideSec: 0, totalSec: 0, transfers: 1 };
       const evaluation = { transfers: 1, rideSec: 0, totalSec: 0 };
       const judgement = judgeAnswer('transfers', evaluation, reference);
       expect(judgement.level).toBe('perfect');
+      expect(judgement.message).toContain('乗換1回');
     });
 
-    it('模範解答より少なければ perfect になる', () => {
+    it('模範解答より少なければ（diff<0）perfect になる', () => {
       const reference: Itinerary = { legs: [], rideSec: 0, totalSec: 0, transfers: 2 };
       const evaluation = { transfers: 1, rideSec: 0, totalSec: 0 };
       const judgement = judgeAnswer('transfers', evaluation, reference);
       expect(judgement.level).toBe('perfect');
     });
 
-    it('模範解答より多ければ good になる', () => {
-      const reference: Itinerary = { legs: [], rideSec: 0, totalSec: 0, transfers: 0 };
-      const evaluation = { transfers: 1, rideSec: 0, totalSec: 0 };
+    it('1回多い（diff=1）なら close になる', () => {
+      const reference: Itinerary = { legs: [], rideSec: 0, totalSec: 0, transfers: 1 };
+      const evaluation = { transfers: 2, rideSec: 0, totalSec: 0 };
       const judgement = judgeAnswer('transfers', evaluation, reference);
-      expect(judgement.level).toBe('good');
+      expect(judgement.level).toBe('close');
+      expect(judgement.message).toContain('おしい');
+      expect(judgement.message).toContain('乗換1回');
+    });
+
+    it('2回以上多い（diff>=2）なら miss になる', () => {
+      const reference: Itinerary = { legs: [], rideSec: 0, totalSec: 0, transfers: 0 };
+      const evaluation = { transfers: 2, rideSec: 0, totalSec: 0 };
+      const judgement = judgeAnswer('transfers', evaluation, reference);
+      expect(judgement.level).toBe('miss');
+      expect(judgement.message).toContain('不正解');
       expect(judgement.message).toContain('乗換0回');
     });
   });
 
   describe('judgeAnswer: reference が null', () => {
-    it('modeによらず good 判定になる', () => {
+    it('modeによらず perfect 扱いになる', () => {
       const evaluation = { transfers: 3, rideSec: 999, totalSec: 999 };
-      expect(judgeAnswer('transfers', evaluation, null).level).toBe('good');
-      expect(judgeAnswer('time', evaluation, null).level).toBe('good');
+      const transfersJudgement = judgeAnswer('transfers', evaluation, null);
+      const timeJudgement = judgeAnswer('time', evaluation, null);
+      expect(transfersJudgement.level).toBe('perfect');
+      expect(timeJudgement.level).toBe('perfect');
+      expect(timeJudgement.message).toContain('模範解答が見つからなかった');
     });
   });
 
@@ -327,14 +450,15 @@ describe('game.ts helpers with miniNetwork', () => {
       expect(judgement.level).toBe('perfect');
     });
 
-    it('丸ノ内線直通で回答すると、timeモードでは中央線直通の模範解答より遅いため perfect にならない', () => {
+    it('丸ノ内線直通で回答すると、timeモードでは中央線直通の模範解答(660秒)の1.1倍超のため miss になる', () => {
       const legs: RouteLeg[] = [{ line: marunouchi, from: tokyoMarunouchi, to: shinjukuMarunouchi }];
       const evaluation = evaluateRoute(network, legs);
-      // 中央線直通(660秒)が time モードの模範解答
+      // 丸ノ内線直通は1200秒 = 模範解答660秒の約1.8倍
       const reference: Itinerary = { legs: [], rideSec: 660, totalSec: 660, transfers: 0 };
 
       const judgement = judgeAnswer('time', evaluation, reference);
-      expect(judgement.level).toBe('good');
+      expect(judgement.level).toBe('miss');
+      expect(judgement.message).toContain('不正解');
       expect(judgement.message).toContain('模範解答');
     });
   });

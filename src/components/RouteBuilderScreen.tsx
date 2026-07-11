@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
-import { buildLeg, formatLineName, stationDisplayName } from '../lib/game.ts';
-import { getNetworkIndex } from '../lib/networkIndex.ts';
-import type { AutocompleteOption } from '../lib/autocomplete.ts';
+import {
+  buildLeg,
+  buildLineOptions,
+  buildStationOptions,
+  stationDisplayName,
+} from '../lib/game.ts';
 import type { Network, RouteLeg } from '../lib/types.ts';
 import { AutocompleteInput } from './AutocompleteInput.tsx';
 import { LineBadge } from './LineBadge.tsx';
@@ -43,56 +46,11 @@ export function RouteBuilderScreen({
 
   // 路線候補は全路線。プレイヤーが路線名を自力で思い出して入力するゲーム性のため、
   // 現在駅を通らない路線もあえて候補に含める（間違いは回答時に判定される）。
-  const lineOptions = useMemo<AutocompleteOption[]>(
-    () =>
-      network.lines.map((line, lineIdx) => {
-        const label = formatLineName(network, lineIdx);
-        return {
-          id: lineIdx,
-          label,
-          searchText: label,
-          badge: { name: line.name, company: line.company, color: line.color },
-        };
-      }),
-    [network]
-  );
+  const lineOptions = useMemo(() => buildLineOptions(network), [network]);
 
   // 降車駅候補は全駅（グループ＝物理駅単位で重複排除）。選択路線に依存しない静的リスト。
-  // 同名別駅（例: 大阪と東京の京橋）を区別できるよう、乗り入れ路線の要約を note に添える。
-  const stationOptions = useMemo<AutocompleteOption[]>(() => {
-    const { lineGroups } = getNetworkIndex(network);
-
-    // グループ -> { 最初に見つかった路線, 乗り入れ路線数 }
-    const groupLineInfo = new Map<number, { firstLine: number; lineCount: number }>();
-    lineGroups.forEach((groups, lineIdx) => {
-      for (const group of groups) {
-        const info = groupLineInfo.get(group);
-        if (info) {
-          info.lineCount++;
-        } else {
-          groupLineInfo.set(group, { firstLine: lineIdx, lineCount: 1 });
-        }
-      }
-    });
-
-    const seenGroups = new Set<number>();
-    const options: AutocompleteOption[] = [];
-    network.stations.forEach((station, stationIdx) => {
-      if (seenGroups.has(station.group)) return;
-      seenGroups.add(station.group);
-      const info = groupLineInfo.get(station.group);
-      const note = info
-        ? `${formatLineName(network, info.firstLine)}${info.lineCount >= 2 ? 'ほか' : ''}`
-        : undefined;
-      options.push({
-        id: stationIdx,
-        label: station.name,
-        searchText: station.name,
-        note,
-      });
-    });
-    return options;
-  }, [network]);
+  // 同名別駅（例: 大阪と東京の京橋）は都道府県名の note で区別する（一意な駅名は note なし）。
+  const stationOptions = useMemo(() => buildStationOptions(network), [network]);
 
   function handleSelectLine(lineIdx: number) {
     setSelectedLine(lineIdx);

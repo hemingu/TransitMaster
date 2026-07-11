@@ -28,6 +28,34 @@ const MODE_LABELS: Record<AnswerMode, string> = {
   transfers: '最小乗換',
 };
 
+/** 判定レベルに応じた結果カードの装飾クラス。判定確定前（null）は中立表示。 */
+function cardClass(level: Judgement['level'] | null): string {
+  switch (level) {
+    case 'perfect':
+      return 'result-card correct perfect';
+    case 'close':
+      return 'result-card close';
+    case 'miss':
+      return 'result-card incorrect';
+    default:
+      return 'result-card';
+  }
+}
+
+/** 判定レベルに応じたヘッドライン。判定確定前（null）は計算中表示。 */
+function headline(level: Judgement['level'] | null): string {
+  switch (level) {
+    case 'perfect':
+      return 'パーフェクト！';
+    case 'close':
+      return 'おしい！';
+    case 'miss':
+      return '不正解…';
+    default:
+      return '判定中...';
+  }
+}
+
 export function ResultScreen({
   network,
   mode,
@@ -62,10 +90,8 @@ export function ResultScreen({
           <p className="answer-route">あなたの経路: {formatRouteLegs(network, legs)}</p>
         </div>
       ) : (
-        <div
-          className={`result-card correct${judgement?.level === 'perfect' ? ' perfect' : ''}`}
-        >
-          <h1>{judgement?.level === 'perfect' ? 'パーフェクト！' : '正解！'}</h1>
+        <div className={cardClass(judgement?.level ?? null)}>
+          <h1>{headline(judgement?.level ?? null)}</h1>
           {judgement && <p className="judgement-message">{judgement.message}</p>}
 
           <div className="comparison">

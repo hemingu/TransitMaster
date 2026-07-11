@@ -129,6 +129,29 @@ describe('buildEkidataNetwork', () => {
         }
       }
     });
+
+    it('pref取り込み: 全駅の pref が pref_cd（13=東京都）になる', () => {
+      expect(network.stations.length).toBeGreaterThan(0);
+      for (const s of network.stations) {
+        expect(s.pref).toBe(13);
+      }
+    });
+
+    it('カナ取り込み: station_name_k が非空の駅（東京）のみ kana が載る', () => {
+      const tokyoIndices = findStationIndices(network, '東京');
+      // 山手線の東京レコード（YMN01）はカナあり
+      const withKana = tokyoIndices.filter((idx) => network.stations[idx].kana === 'トウキョウ');
+      expect(withKana.length).toBe(1);
+      // カナ未設定の駅は undefined（空文字は載せない）
+      const kandaIdx = findStationIndices(network, '神田')[0];
+      expect(network.stations[kandaIdx].kana).toBeUndefined();
+    });
+
+    it('カナ取り込み: line_name_k が非空の路線（山手線）のみ kana が載る', () => {
+      expect(findLine(network, '山手線').kana).toBe('ヤマノテセン');
+      expect(findLine(network, '中央線').kana).toBeUndefined();
+      expect(findLine(network, 'テスト電鉄本線').kana).toBeUndefined();
+    });
   });
 
   describe('N02あり（東海道新幹線マージ）', () => {
@@ -209,6 +232,23 @@ describe('buildEkidataNetwork', () => {
       expect(log.some((l) => l.includes('N02駅統合') && l.includes('東京'))).toBe(true);
       expect(log.some((l) => l.includes('N02駅統合') && l.includes('品川'))).toBe(true);
       expect(log.some((l) => l.includes('N02駅統合') && l.includes('新横浜'))).toBe(true);
+    });
+
+    it('pref引き継ぎ: 既存groupへ統合されたN02駅は在来駅のpref、新規group駅は0', () => {
+      const shinkansen = findLine(network, '東海道新幹線');
+      const [tokyoIdx, shinagawaIdx, shinYokohamaIdx] = shinkansen.patterns[0].stops;
+      // 東京・品川はekidata側（pref_cd=13）へ統合されるためprefを引き継ぐ
+      expect(network.stations[tokyoIdx].pref).toBe(13);
+      expect(network.stations[shinagawaIdx].pref).toBe(13);
+      // 新横浜はekidata側に対応駅がない新規groupなのでpref=0（不明）
+      expect(network.stations[shinYokohamaIdx].pref).toBe(0);
+    });
+
+    it('N02駅にはカナが載らない（undefined）', () => {
+      const shinkansen = findLine(network, '東海道新幹線');
+      for (const idx of shinkansen.patterns[0].stops) {
+        expect(network.stations[idx].kana).toBeUndefined();
+      }
     });
   });
 
