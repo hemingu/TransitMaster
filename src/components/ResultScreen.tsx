@@ -56,6 +56,36 @@ function headline(level: Judgement['level'] | null): string {
   }
 }
 
+/** 模範解答カラム（valid/invalid 両分岐から使う共通表示）。 */
+function ReferenceColumn({
+  network,
+  reference,
+  referenceLoading,
+}: {
+  network: Network;
+  reference: Itinerary | null;
+  referenceLoading: boolean;
+}) {
+  return (
+    <div className="comparison-col">
+      <h2>模範解答</h2>
+      {referenceLoading && <p className="muted">計算中...</p>}
+      {!referenceLoading && reference === null && (
+        <p className="muted">模範解答が見つかりませんでした。</p>
+      )}
+      {!referenceLoading && reference !== null && (
+        <>
+          <p className="answer-route">{formatRouteLegs(network, reference.legs)}</p>
+          <ul className="stat-list">
+            <li>乗換回数: {reference.transfers}回</li>
+            <li>所要時間: {formatEstimatedDuration(reference.totalSec)}</li>
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function ResultScreen({
   network,
   mode,
@@ -88,6 +118,15 @@ export function ResultScreen({
             {reasonMessage(network, legs, invalidReason, invalidLegIndex)}
           </p>
           <p className="answer-route">あなたの経路: {formatRouteLegs(network, legs)}</p>
+
+          {/* 経路が無効でも「正しくはどう行くのか」を学べるよう模範解答を表示する */}
+          <div className="comparison">
+            <ReferenceColumn
+              network={network}
+              reference={reference}
+              referenceLoading={referenceLoading}
+            />
+          </div>
         </div>
       ) : (
         <div className={cardClass(judgement?.level ?? null)}>
@@ -111,22 +150,11 @@ export function ResultScreen({
               )}
             </div>
 
-            <div className="comparison-col">
-              <h2>模範解答</h2>
-              {referenceLoading && <p className="muted">計算中...</p>}
-              {!referenceLoading && reference === null && (
-                <p className="muted">模範解答が見つかりませんでした。</p>
-              )}
-              {!referenceLoading && reference !== null && (
-                <>
-                  <p className="answer-route">{formatRouteLegs(network, reference.legs)}</p>
-                  <ul className="stat-list">
-                    <li>乗換回数: {reference.transfers}回</li>
-                    <li>所要時間: {formatEstimatedDuration(reference.totalSec)}</li>
-                  </ul>
-                </>
-              )}
-            </div>
+            <ReferenceColumn
+              network={network}
+              reference={reference}
+              referenceLoading={referenceLoading}
+            />
           </div>
         </div>
       )}

@@ -140,6 +140,16 @@ function App() {
     setCurrentStation(question?.origin ?? null);
   }
 
+  /** 模範解答をワーカーで探索して reference にセットする（探索中は referenceLoading を立てる）。 */
+  async function loadReference(origin: number, destination: number): Promise<Itinerary | null> {
+    setReferenceLoading(true);
+    setReference(null);
+    setJudgement(null);
+    const itinerary = await search(origin, destination, mode);
+    setReference(itinerary);
+    return itinerary;
+  }
+
   async function handleSubmit() {
     if (!network || !question) return;
 
@@ -155,6 +165,10 @@ function App() {
       setTotalAnswered((n) => n + 1);
       setStreak(0);
       setScreen('result');
+
+      // 経路が無効でも「正しくはどう行くのか」を学べるよう模範解答は表示する（judgement は null のまま）
+      await loadReference(question.origin, question.destination);
+      setReferenceLoading(false);
       return;
     }
 
@@ -163,11 +177,7 @@ function App() {
     setTotalAnswered((n) => n + 1);
     setScreen('result');
 
-    setReferenceLoading(true);
-    setReference(null);
-    setJudgement(null);
-    const itinerary = await search(question.origin, question.destination, mode);
-    setReference(itinerary);
+    const itinerary = await loadReference(question.origin, question.destination);
     const judged = judgeAnswer(mode, evaluation, itinerary);
     setJudgement(judged);
     // 「正解」はパーフェクト（模範解答と同等以下）のみ。close/miss は連続正解をリセットする
