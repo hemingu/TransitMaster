@@ -284,6 +284,61 @@ describe('game.ts helpers with miniNetwork', () => {
       expect(nazo[0].note).toBeUndefined();
       expect(nazo[1].note).toBe('東京都');
     });
+
+    it('excludeShinkansen: 新幹線路線と新幹線単独駅が候補から除外される', () => {
+      // 新幹線（lineType 1）＋並行在来線＋新幹線単独駅（山里）の小ネットワーク
+      const shinkansenNet: Network = {
+        formatVersion: 2,
+        stations: [
+          { name: '中央', lat: 35, lon: 139, group: 0, pref: 13 }, // 0 新幹線
+          { name: '東港', lat: 35.1, lon: 139.5, group: 1, pref: 13 }, // 1 新幹線
+          { name: '山里', lat: 35.2, lon: 140, group: 2, pref: 0 }, // 2 新幹線単独駅
+          { name: '中央', lat: 35, lon: 139, group: 0, pref: 13 }, // 3 在来線
+          { name: '東港', lat: 35.1, lon: 139.5, group: 1, pref: 13 }, // 4 在来線
+        ],
+        lines: [
+          {
+            name: 'テスト新幹線',
+            company: 'テスト鉄道',
+            color: null,
+            lineType: 1,
+            patterns: [{ stops: [0, 1, 2], segSec: [100, 100] }],
+          },
+          {
+            name: 'テスト在来線',
+            company: 'テスト鉄道',
+            color: null,
+            lineType: 2,
+            patterns: [{ stops: [3, 4], segSec: [1000] }],
+          },
+        ],
+        transferSec: 300,
+      };
+
+      // 路線候補: 除外なしは2路線、excludeShinkansen で在来線のみ
+      expect(buildLineOptions(shinkansenNet).length).toBe(2);
+      const lineOpts = buildLineOptions(shinkansenNet, { excludeShinkansen: true });
+      expect(lineOpts.length).toBe(1);
+      expect(lineOpts[0].label).toBe('テスト在来線（テスト鉄道）');
+
+      // 駅候補: 除外なしは3グループ、excludeShinkansen で新幹線単独駅（山里）が消える
+      expect(buildStationOptions(shinkansenNet).map((o) => o.label)).toEqual([
+        '中央',
+        '東港',
+        '山里',
+      ]);
+      const stationOpts = buildStationOptions(shinkansenNet, { excludeShinkansen: true });
+      expect(stationOpts.map((o) => o.label)).toEqual(['中央', '東港']);
+    });
+
+    it('excludeShinkansen: 新幹線が無いネットワークでは候補が変わらない', () => {
+      expect(buildLineOptions(network, { excludeShinkansen: true }).length).toBe(
+        network.lines.length
+      );
+      expect(buildStationOptions(network, { excludeShinkansen: true }).length).toBe(
+        buildStationOptions(network).length
+      );
+    });
   });
 
   describe('reasonMessage', () => {

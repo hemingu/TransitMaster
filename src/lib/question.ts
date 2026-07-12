@@ -11,6 +11,12 @@ export interface QuestionOptions {
   minTransfers?: number;
   maxTransfers?: number;
   rng?: () => number;
+  /**
+   * true のとき新幹線（lineType===1）を到達性判定から除外する。
+   * ゲームルール上、新幹線は「日本全国」エリアでのみ使用できるため、それ以外のエリアでは
+   * 「新幹線でしか到達できない駅ペア」を出題しないようにする。
+   */
+  excludeShinkansen?: boolean;
 }
 
 const MAX_ATTEMPTS = 200;
@@ -20,11 +26,13 @@ const MAX_ATTEMPTS = 200;
  * ノード=路線。2路線が同一乗換グループの駅を共有すれば辺で接続。
  * 出発駅グループが乗れる路線集合から到着駅グループへ到達するまでの最小路線数-1が乗換回数。
  * 到達不可能な場合は null。
+ * excludeShinkansen が true のとき、新幹線（lineType===1）の路線をBFSから除外する。
  */
 function minTransfersBetweenGroups(
   network: Network,
   originGroup: number,
-  destGroup: number
+  destGroup: number,
+  excludeShinkansen = false
 ): number | null {
   if (originGroup === destGroup) return 0;
 
@@ -32,9 +40,13 @@ function minTransfersBetweenGroups(
   // 出題リトライのたびに全路線を線形走査する再計算を避ける）
   const lineGroups = getNetworkIndex(network).lineGroups;
 
+  const isExcluded = (lineIdx: number) =>
+    excludeShinkansen && network.lines[lineIdx].lineType === 1;
+
   const originLines: number[] = [];
   const destLines: number[] = [];
   lineGroups.forEach((groups, lineIdx) => {
+    if (isExcluded(lineIdx)) return;
     if (groups.has(originGroup)) originLines.push(lineIdx);
     if (groups.has(destGroup)) destLines.push(lineIdx);
   });
@@ -65,6 +77,7 @@ function minTransfersBetweenGroups(
     }
     for (let lineIdx = 0; lineIdx < network.lines.length; lineIdx++) {
       if (visited.has(lineIdx)) continue;
+      if (isExcluded(lineIdx)) continue;
       const groups = lineGroups[lineIdx];
       let connects = false;
       for (const g of reachableGroups) {
@@ -99,6 +112,7 @@ export function generateQuestion(
   const minTransfers = opts.minTransfers ?? 1;
   const maxTransfers = opts.maxTransfers;
   const rng = opts.rng ?? Math.random;
+  const excludeShinkansen = opts.excludeShinkansen ?? false;
 
   if (areaStations.length < 2) return null;
 
@@ -114,7 +128,7 @@ export function generateQuestion(
     const destGroup = network.stations[destination].group;
     if (originGroup === destGroup) continue;
 
-    const result = minTransfersBetweenGroups(network, originGroup, destGroup);
+    const result = minTransfersBetweenGroups(network, originGroup, destGroup, excludeShinkansen);
     if (result === null) continue;
     if (result < minTransfers) continue;
     if (maxTransfers !== undefined && result > maxTransfers) continue;

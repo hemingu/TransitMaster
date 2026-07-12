@@ -13,6 +13,8 @@ interface RouteBuilderScreenProps {
   network: Network;
   origin: number;
   destination: number;
+  /** true のとき新幹線（lineType===1）を路線・駅候補から除外する（「日本全国」以外のエリア）。 */
+  excludeShinkansen: boolean;
   streak: number;
   totalCorrect: number;
   totalAnswered: number;
@@ -28,6 +30,7 @@ export function RouteBuilderScreen({
   network,
   origin,
   destination,
+  excludeShinkansen,
   streak,
   totalCorrect,
   totalAnswered,
@@ -46,11 +49,18 @@ export function RouteBuilderScreen({
 
   // 路線候補は全路線。プレイヤーが路線名を自力で思い出して入力するゲーム性のため、
   // 現在駅を通らない路線もあえて候補に含める（間違いは回答時に判定される）。
-  const lineOptions = useMemo(() => buildLineOptions(network), [network]);
+  // ただし新幹線は「日本全国」エリア限定ルールのため excludeShinkansen 時は除外する。
+  const lineOptions = useMemo(
+    () => buildLineOptions(network, { excludeShinkansen }),
+    [network, excludeShinkansen]
+  );
 
   // 降車駅候補は全駅（グループ＝物理駅単位で重複排除）。選択路線に依存しない静的リスト。
   // 同名別駅（例: 大阪と東京の京橋）は都道府県名の note で区別する（一意な駅名は note なし）。
-  const stationOptions = useMemo(() => buildStationOptions(network), [network]);
+  const stationOptions = useMemo(
+    () => buildStationOptions(network, { excludeShinkansen }),
+    [network, excludeShinkansen]
+  );
 
   function handleSelectLine(lineIdx: number) {
     setSelectedLine(lineIdx);

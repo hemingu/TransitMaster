@@ -90,6 +90,13 @@
   color: var(--muted);
 }
 
+/* セクション見出し直下の補足注記（例: 新幹線は「日本全国」エリア限定ルール） */
+.setup-note {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
 .primary-button {
   padding: 14px 20px;
   border-radius: 10px;

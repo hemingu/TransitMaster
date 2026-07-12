@@ -161,3 +161,66 @@ describe('generateQuestion (miniNetwork)', () => {
     expect(q).toBeNull();
   });
 });
+
+describe('generateQuestion: excludeShinkansen（新幹線は「日本全国」エリア限定ルール）', () => {
+  /** raptor.test.ts の shinkansenNetwork と同構成の小ネットワーク（新幹線＋並行在来線＋新幹線単独駅）。 */
+  function shinkansenNetwork(): Network {
+    return {
+      formatVersion: 2,
+      stations: [
+        { name: '中央', lat: 35, lon: 139, group: 0, pref: 13 }, // 0 新幹線
+        { name: '東港', lat: 35.1, lon: 139.5, group: 1, pref: 13 }, // 1 新幹線
+        { name: '山里', lat: 35.2, lon: 140, group: 2, pref: 0 }, // 2 新幹線単独駅
+        { name: '中央', lat: 35, lon: 139, group: 0, pref: 13 }, // 3 在来線
+        { name: '東港', lat: 35.1, lon: 139.5, group: 1, pref: 13 }, // 4 在来線
+      ],
+      lines: [
+        {
+          name: 'テスト新幹線',
+          company: 'テスト鉄道',
+          color: null,
+          lineType: 1,
+          patterns: [{ stops: [0, 1, 2], segSec: [100, 100] }],
+        },
+        {
+          name: 'テスト在来線',
+          company: 'テスト鉄道',
+          color: null,
+          lineType: 2,
+          patterns: [{ stops: [3, 4], segSec: [1000] }],
+        },
+      ],
+      transferSec: 300,
+    };
+  }
+
+  it('新幹線のみで繋がるペア（中央-山里）は excludeShinkansen で出題されない', () => {
+    const net = shinkansenNetwork();
+    const areaStations = [0, 2]; // 中央（新幹線レコード）と山里
+    const rng = makeSeededRng([0.1, 0.3, 0.6, 0.8]);
+
+    // 除外なしなら出題可能（新幹線直通 = 乗換0）
+    const withShinkansen = generateQuestion(net, areaStations, { minTransfers: 0, rng });
+    expect(withShinkansen).not.toBeNull();
+
+    // 除外すると到達不能扱いになり出題されない
+    const withoutShinkansen = generateQuestion(net, areaStations, {
+      minTransfers: 0,
+      excludeShinkansen: true,
+      rng: makeSeededRng([0.1, 0.3, 0.6, 0.8]),
+    });
+    expect(withoutShinkansen).toBeNull();
+  });
+
+  it('在来線でも繋がるペア（中央-東港）は excludeShinkansen でも出題される', () => {
+    const net = shinkansenNetwork();
+    const areaStations = [0, 1];
+    const q = generateQuestion(net, areaStations, {
+      minTransfers: 0,
+      excludeShinkansen: true,
+      rng: makeSeededRng([0.1, 0.3]),
+    });
+    expect(q).not.toBeNull();
+    expect(q!.minTransfers).toBe(0);
+  });
+});

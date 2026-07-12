@@ -67,21 +67,56 @@ export function formatLineName(network: Network, lineIdx: number): string {
 }
 
 /**
+ * オートコンプリート候補構築のオプション。
+ * excludeShinkansen: ゲームルール上、新幹線（lineType===1）は「日本全国」エリアでのみ
+ * 使用できるため、それ以外のエリアでは候補からも除外する。
+ */
+export interface CandidateOptions {
+  excludeShinkansen?: boolean;
+}
+
+/**
  * 路線オートコンプリートの候補一覧（全路線）を構築する。
  * label は「路線名（事業者名）」、searchText はふりがな（カナ）があればカタカナ・ひらがな両方を連結して
  * カナ入力でもヒットするようにする。badge は LineBadge 表示用。
+ * opts.excludeShinkansen が true なら新幹線（lineType===1）を候補に含めない。
  */
-export function buildLineOptions(network: Network): AutocompleteOption[] {
-  return network.lines.map((line, lineIdx) => {
+export function buildLineOptions(
+  network: Network,
+  opts: CandidateOptions = {}
+): AutocompleteOption[] {
+  const options: AutocompleteOption[] = [];
+  network.lines.forEach((line, lineIdx) => {
+    if (opts.excludeShinkansen && line.lineType === 1) return;
     const label = formatLineName(network, lineIdx);
     const searchText = line.kana ? `${label} ${line.kana} ${kataToHira(line.kana)}` : label;
-    return {
+    options.push({
       id: lineIdx,
       label,
       searchText,
       badge: { name: line.name, company: line.company, color: line.color },
-    };
+    });
   });
+  return options;
+}
+
+/**
+ * 「新幹線（lineType===1）の路線にしか属さない」駅グループの集合を返す
+ * （岐阜羽島・安中榛名などの新幹線単独駅。excludeShinkansen 時は候補から除外する）。
+ */
+function shinkansenOnlyGroups(network: Network): Set<number> {
+  const { lineGroups } = getNetworkIndex(network);
+  const shinkansenGroups = new Set<number>();
+  const otherGroups = new Set<number>();
+  lineGroups.forEach((groups, lineIdx) => {
+    const target = network.lines[lineIdx].lineType === 1 ? shinkansenGroups : otherGroups;
+    for (const g of groups) target.add(g);
+  });
+  const result = new Set<number>();
+  for (const g of shinkansenGroups) {
+    if (!otherGroups.has(g)) result.add(g);
+  }
+  return result;
 }
 
 /**
@@ -90,8 +125,14 @@ export function buildLineOptions(network: Network): AutocompleteOption[] {
  * - searchText はふりがな（カナ）があればカタカナ・ひらがな両方を連結
  * - 同じ駅名が複数グループに存在する場合（例: 大阪と東京の京橋）に限り、
  *   note に都道府県名を添えて区別できるようにする（pref=0 等で判定不能なら表示しない）
+ * - opts.excludeShinkansen が true なら新幹線路線にしか属さない駅（新幹線単独駅）を候補に含めない
  */
-export function buildStationOptions(network: Network): AutocompleteOption[] {
+export function buildStationOptions(
+  network: Network,
+  opts: CandidateOptions = {}
+): AutocompleteOption[] {
+  const excludedGroups = opts.excludeShinkansen ? shinkansenOnlyGroups(network) : null;
+
   const seenGroups = new Set<number>();
   const representatives: { stationIdx: number; name: string; kana?: string; pref: number }[] = [];
   const groupCountByName = new Map<string, number>();
@@ -99,6 +140,7 @@ export function buildStationOptions(network: Network): AutocompleteOption[] {
   network.stations.forEach((station, stationIdx) => {
     if (seenGroups.has(station.group)) return;
     seenGroups.add(station.group);
+    if (excludedGroups?.has(station.group)) return;
     representatives.push({
       stationIdx,
       name: station.name,

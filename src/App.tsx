@@ -100,11 +100,19 @@ function App() {
     return counts;
   }, [network]);
 
+  // ゲームルール: 新幹線（lineType===1）は「日本全国」エリアでのみ使用できる。
+  // それ以外のエリアでは出題・候補・模範解答のすべてから新幹線を除外する。
+  const excludeShinkansen = area !== 'japan';
+
   function startQuestion() {
     if (!network) return;
     const areaStations = stationsInArea(network, area);
     const { minTransfers, maxTransfers } = difficultyToTransferRange(difficulty);
-    const q = generateQuestion(network, areaStations, { minTransfers, maxTransfers });
+    const q = generateQuestion(network, areaStations, {
+      minTransfers,
+      maxTransfers,
+      excludeShinkansen,
+    });
     if (!q) {
       setSetupError(
         '条件に合う出題を作成できませんでした。エリアまたは難易度を変えてお試しください。'
@@ -145,7 +153,7 @@ function App() {
     setReferenceLoading(true);
     setReference(null);
     setJudgement(null);
-    const itinerary = await search(origin, destination, mode);
+    const itinerary = await search(origin, destination, mode, excludeShinkansen);
     setReference(itinerary);
     return itinerary;
   }
@@ -221,6 +229,7 @@ function App() {
         network={network}
         origin={question.origin}
         destination={question.destination}
+        excludeShinkansen={excludeShinkansen}
         streak={streak}
         totalCorrect={totalCorrect}
         totalAnswered={totalAnswered}

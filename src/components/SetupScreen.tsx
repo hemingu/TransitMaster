@@ -44,6 +44,7 @@ export function SetupScreen({
 
       <section className="setup-group">
         <h2>エリア</h2>
+        <p className="setup-note">※新幹線は「日本全国」エリアでのみ使用できます</p>
         <div className="choice-grid">
           {AREA_ORDER.map((id) => {
             const count = areaStationCounts[id] ?? 0;

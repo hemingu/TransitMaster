@@ -198,11 +198,21 @@ function propagateFootpath(
   return readyUpdated;
 }
 
+/** searchRoute の探索オプション。 */
+export interface SearchRouteOptions {
+  /**
+   * true のとき新幹線（lineType === 1）の路線を探索対象から除外する。
+   * ゲームルール上、新幹線は「日本全国」エリアでのみ使用できるため、
+   * それ以外のエリアでは模範解答にも新幹線を使わせない。
+   */
+  excludeShinkansen?: boolean;
+}
+
 /**
  * from を起点に MAX_ROUNDS まで探索を実行し、各ラウンドの到達状態を返す。
  * ラウンドk（k>=1、rounds[k-1]に対応）= 乗車k回目（乗換k-1回）の到達状況。
  */
-function runSearch(network: Network, from: number): RoundState[] {
+function runSearch(network: Network, from: number, excludeShinkansen: boolean): RoundState[] {
   const index = getNetworkIndex(network);
   const n = network.stations.length;
   const fromGroup = network.stations[from].group;
@@ -240,6 +250,8 @@ function runSearch(network: Network, from: number): RoundState[] {
     const patternList: StationPatternRef[] = [];
     for (const stationIdx of improvedStations) {
       for (const ref of index.stationPatterns[stationIdx]) {
+        // 新幹線除外時は lineType===1 の路線のパターンをスキャン対象に入れない
+        if (excludeShinkansen && network.lines[ref.line].lineType === 1) continue;
         const key = `${ref.line}:${ref.pattern}`;
         if (!seen.has(key)) {
           seen.add(key);
@@ -353,12 +365,16 @@ function reconstructLegs(rounds: RoundState[], round: number, goalStation: numbe
  * mode ごとの解選択:
  * - 'time': 全ラウンドを通じて目的地グループへの最小到達値(arrival)。同値なら小ラウンド優先。
  * - 'transfers': 目的地グループに到達可能な最小ラウンド（＝最小乗換回数）。tie-breakはarrival。
+ *
+ * opts.excludeShinkansen が true のとき、新幹線（lineType===1）を使わない経路のみ探索する
+ * （新幹線でしか到達できない場合は null）。
  */
 export function searchRoute(
   network: Network,
   from: number,
   to: number,
-  mode: AnswerMode
+  mode: AnswerMode,
+  opts: SearchRouteOptions = {}
 ): Itinerary | null {
   const fromGroup = network.stations[from].group;
   const toGroup = network.stations[to].group;
@@ -368,7 +384,7 @@ export function searchRoute(
     return null;
   }
 
-  const rounds = runSearch(network, from);
+  const rounds = runSearch(network, from, opts.excludeShinkansen === true);
 
   // 各ラウンドでの目的地グループへの最良到達を収集
   const perRoundBest: { round: number; station: number; arrival: number }[] = [];
