@@ -198,13 +198,13 @@ export function SetupScreen({
         </section>
 
 
+          <h3 className="challenge-rules-title">ルール</h3>
           <ul className="setup-note challenge-rules">
-            <li>出発駅と到着駅は東京23区内の駅のみです。</li>
-            <li>最小の乗換回数となるようなルートを解答してください。</li>
+            <li>出発駅と到着駅が示されるので、最小の乗換回数となるルートを解答する。</li>
+            <li>
+              ただし、有料特急や座席指定ライナーなどは使用せず、乗車券のみで乗れる列車のみでルートを構成する。
+            </li>
           </ul>
-          <p className="setup-note">
-            模範解答は乗車券のみで乗れる列車（無料の列車）で計算しています。有料特急・座席指定ライナーは使用しません。
-          </p>
 
           {errorMessage && <p className="error-message">{errorMessage}</p>}
 
