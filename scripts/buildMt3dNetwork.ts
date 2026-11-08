@@ -30,6 +30,13 @@ export interface TransferGroupOverrides {
   /** 該当グループ内の全駅を出題の出発駅・到着駅にしない（noQuestion）。 */
   exclude?: string[][];
   /**
+   * 駅名単位の出題除外。この駅名の駅レコードだけを出題の出発駅・到着駅にしない（noQuestion）。
+   * グループ内の他の駅名は出題に使え、経路の途中の乗換やオートコンプリートでは従来どおり使える
+   * （例: モノレール浜松町は外から乗り入れる列車がなく、到着させると往復する経路になるため除外）。
+   * 該当する駅が無ければビルドを失敗させる。
+   */
+  excludeNames?: string[];
+  /**
    * 駅名の上書き（MT3D の駅名 -> 採用する駅名）。ビルドの最初に適用するので、グループ化・端点判定・
    * S12 照合はすべて上書き後の名前で行う（例: 押上の表記ゆれ統一）。キーに該当する駅が無ければビルドを失敗させる。
    */
@@ -830,11 +837,16 @@ export function buildMt3dNetwork(rawInput: Mt3dInput): BuildResult {
     if (noQuestion.has(root)) st.noQuestion = true;
     return st;
   });
+  for (const name of ov?.excludeNames ?? []) {
+    const hits = stations.filter((st) => st.name === name);
+    if (hits.length === 0) throw new Error(`excludeNames: 駅名「${name}」の駅が見つかりません`);
+    for (const st of hits) st.noQuestion = true;
+  }
   log.push(
     `駅レコード: ${stations.length} 件 / 乗換グループ: ${groupIdOfRoot.size} 件（station-groups ${groupedComplexes} 件、alternate ${alternatePairs} 件、同名近接 ${nearPairs} 件を統合）`
   );
   log.push(
-    `手動調整: split ${ov?.split?.length ?? 0} 件、merge ${ov?.merge?.length ?? 0} 件、exclude ${ov?.exclude?.length ?? 0} 件（出題除外駅レコード ${stations.filter((x) => x.noQuestion).length} 件）`
+    `手動調整: split ${ov?.split?.length ?? 0} 件、merge ${ov?.merge?.length ?? 0} 件、exclude ${ov?.exclude?.length ?? 0} 件、excludeNames ${ov?.excludeNames?.length ?? 0} 件（出題除外駅レコード ${stations.filter((x) => x.noQuestion).length} 件）`
   );
 
   // ---- 乗降客数（S12）の対応付け ----
@@ -854,7 +866,7 @@ export function buildMt3dNetwork(rawInput: Mt3dInput): BuildResult {
       else members.set(st.group, [i]);
       if (st.ridership !== undefined) total.set(st.group, (total.get(st.group) ?? 0) + st.ridership);
     });
-    const candidates = [...members.keys()].filter((g) => !stations[members.get(g)![0]].noQuestion);
+    const candidates = [...members.keys()].filter((g) => members.get(g)!.some((i) => !stations[i].noQuestion));
     const withData = candidates.filter((g) => total.has(g));
     const groupName = (g: number) => {
       const ms = members.get(g)!;

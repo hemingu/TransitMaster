@@ -45,6 +45,20 @@ describe('乗換グループの手動調整（overrides）', () => {
     expect([...groupsOf(net, '東京')][0]).toBe([...groupsOf(net, '上野')][0]);
   });
 
+  it('excludeNames: その駅名のレコードだけ noQuestion が付き、同じグループの他の駅名には付かない', () => {
+    const net = build({ excludeNames: ['新宿西口'] });
+    for (const st of net.stations) {
+      if (st.name === '新宿西口') expect(st.noQuestion).toBe(true);
+      else expect(st.noQuestion).toBeUndefined();
+    }
+    // グループ自体は変わらない（途中の乗換は従来どおり可能）
+    expect(groupsOf(net, '新宿西口')).toEqual(groupsOf(net, '新宿'));
+  });
+
+  it('excludeNames: 該当駅が無ければエラー', () => {
+    expect(() => build({ excludeNames: ['存在しない駅'] })).toThrow(/存在しない駅/);
+  });
+
   it('exclude: グループ内の全駅に noQuestion が付き、他は付かない', () => {
     const net = build({ exclude: [['新宿三丁目']] });
     for (const s of net.stations) {
