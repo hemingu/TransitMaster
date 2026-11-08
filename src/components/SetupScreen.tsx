@@ -217,9 +217,9 @@ export function SetupScreen({
       <p className="credit">
         データ出典：
         <a href="https://github.com/nagix/mini-tokyo-3d" target="_blank" rel="noopener noreferrer">
-          Mini Tokyo 3D (MIT)
+          Mini Tokyo 3D
         </a>
-        、
+        {' (MIT)、'}
         <a
           href="https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-S12-2024.html"
           target="_blank"
