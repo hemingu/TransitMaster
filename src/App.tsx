@@ -11,6 +11,7 @@ import {
   CHALLENGE_MODE,
   CHALLENGE_QUESTION_COUNT,
   CHALLENGE_TRANSFER_RANGE,
+  drawChallengeTransferRange,
   challengeReducer,
   challengeStations,
 } from './lib/challenge.ts';
@@ -132,13 +133,18 @@ function App() {
   function startChallengeQuestion(used: { origin: number; destination: number }[]): boolean {
     if (!network) return false;
     const stations = challengeStations(network, difficulty);
-    const { minTransfers, maxTransfers } = CHALLENGE_TRANSFER_RANGE;
+    // 1問ごとに抽選: 低確率で乗換なし、それ以外は乗換1回以上（乗換なしが作れなければ通常レンジにフォールバック）
+    const drawn = drawChallengeTransferRange(difficulty);
     const isUsed = (o: number, d: number) =>
       used.some(
         (u) => (u.origin === o && u.destination === d) || (u.origin === d && u.destination === o)
       );
     for (let attempt = 0; attempt < 30; attempt++) {
-      const q = generateQuestion(network, stations, { minTransfers, maxTransfers });
+      const q =
+        generateQuestion(network, stations, drawn) ??
+        (drawn === CHALLENGE_TRANSFER_RANGE
+          ? null
+          : generateQuestion(network, stations, CHALLENGE_TRANSFER_RANGE));
       if (!q) break;
       if (isUsed(q.origin, q.destination)) continue;
       setSetupError(null);

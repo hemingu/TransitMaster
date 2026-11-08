@@ -4,6 +4,9 @@ import {
   CHALLENGE_QUESTION_COUNT,
   CHALLENGE_TOP_GROUPS,
   CHALLENGE_TRANSFER_RANGE,
+  CHALLENGE_ZERO_TRANSFER_PROBABILITY,
+  CHALLENGE_ZERO_TRANSFER_RANGE,
+  drawChallengeTransferRange,
   challengeStations,
   type ChallengeState,
   buildShareIntentUrl,
@@ -121,9 +124,9 @@ describe('チャレンジの難易度（出題駅プール）', () => {
   ) as Network;
   const levels: Difficulty[] = ['easy', 'normal', 'hard'];
 
-  it('定数と乗換レンジ（1〜2回固定）', () => {
+  it('定数と乗換レンジ（1回以上）', () => {
     expect(CHALLENGE_TOP_GROUPS).toEqual({ easy: 50, normal: 100, hard: null });
-    expect(CHALLENGE_TRANSFER_RANGE).toEqual({ minTransfers: 1, maxTransfers: 2 });
+    expect(CHALLENGE_TRANSFER_RANGE).toEqual({ minTransfers: 1 });
   });
 
   it('プールは かんたん ⊂ ふつう ⊂ むずかしい で、グループ数は上位N（同値分のみ超過可）', () => {
@@ -143,7 +146,7 @@ describe('チャレンジの難易度（出題駅プール）', () => {
     );
   });
 
-  it.each(levels)('%s: 乗換1〜2回の問題を20問生成でき、出発・到着はプール内', (d) => {
+  it.each(levels)('%s: 乗換1回以上の問題を20問生成でき、出発・到着はプール内', (d) => {
     const pool = challengeStations(network, d);
     const set = new Set(pool);
     for (let i = 0; i < 20; i++) {
@@ -152,5 +155,28 @@ describe('チャレンジの難易度（出題駅プール）', () => {
       expect(set.has(q!.origin)).toBe(true);
       expect(set.has(q!.destination)).toBe(true);
     }
+  });
+});
+
+describe('乗換なし問題の抽選', () => {
+  const network = JSON.parse(
+    readFileSync(new URL('../public/data/network.json', import.meta.url), 'utf8')
+  ) as Network;
+  const levels: Difficulty[] = ['easy', 'normal', 'hard'];
+  it('難易度ごとの確率', () => {
+    expect(CHALLENGE_ZERO_TRANSFER_PROBABILITY).toEqual({ easy: 0.05, normal: 0.01, hard: 0.001 });
+  });
+  it('抽選値が確率未満なら乗換なし、以上なら通常レンジ', () => {
+    expect(drawChallengeTransferRange('easy', () => 0.049)).toBe(CHALLENGE_ZERO_TRANSFER_RANGE);
+    expect(drawChallengeTransferRange('easy', () => 0.05)).toBe(CHALLENGE_TRANSFER_RANGE);
+    expect(drawChallengeTransferRange('normal', () => 0.0099)).toBe(CHALLENGE_ZERO_TRANSFER_RANGE);
+    expect(drawChallengeTransferRange('normal', () => 0.01)).toBe(CHALLENGE_TRANSFER_RANGE);
+    expect(drawChallengeTransferRange('hard', () => 0.0009)).toBe(CHALLENGE_ZERO_TRANSFER_RANGE);
+    expect(drawChallengeTransferRange('hard', () => 0.001)).toBe(CHALLENGE_TRANSFER_RANGE);
+  });
+  it.each(levels)('%s: 乗換なし問題をプールから生成できる', (d) => {
+    const q = generateQuestion(network, challengeStations(network, d), CHALLENGE_ZERO_TRANSFER_RANGE);
+    expect(q).not.toBeNull();
+    expect(q!.minTransfers).toBe(0);
   });
 });

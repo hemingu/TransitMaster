@@ -74,7 +74,7 @@ export function SetupScreen({
             onClick={() => onGameModeChange('challenge')}
           >
             <span className="game-mode-title">チャレンジモード</span>
-            <span className="game-mode-desc">東京23区・主要駅で10問。結果をXでシェア</span>
+            <span className="game-mode-desc">東京23区で10問。結果をXでシェア</span>
           </button>
           <button
             type="button"

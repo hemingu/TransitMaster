@@ -6,17 +6,39 @@ import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from '
 /** チャレンジモードの出題数。 */
 export const CHALLENGE_QUESTION_COUNT = 10;
 
-/** チャレンジモードの固定条件（エリアは東京23区内、乗換は1〜2回、答え方は最小乗換）。 */
+/** チャレンジモードの固定条件（エリアは東京23区内、乗換は原則1回以上（低確率で乗換なし）、答え方は最小乗換）。 */
 export const CHALLENGE_MODE: AnswerMode = 'transfers';
 
 /** チャレンジモードの出題エリア。 */
 export const CHALLENGE_AREA: AreaId = 'tokyo23';
 
-/** チャレンジモードの乗換回数レンジ（難易度によらず固定）。 */
+/** チャレンジモードの通常の乗換回数レンジ（乗換1回以上・上限なし、難易度によらず固定）。 */
 export const CHALLENGE_TRANSFER_RANGE: { minTransfers: number; maxTransfers?: number } = {
   minTransfers: 1,
-  maxTransfers: 2,
 };
+
+/** 乗換なし問題のレンジ。 */
+export const CHALLENGE_ZERO_TRANSFER_RANGE: { minTransfers: number; maxTransfers?: number } = {
+  minTransfers: 0,
+  maxTransfers: 0,
+};
+
+/** 1問ごとに乗換なし問題を出す確率（抽選値）。外れた場合は通常レンジ（乗換1回以上）で出題する。 */
+export const CHALLENGE_ZERO_TRANSFER_PROBABILITY: Record<Difficulty, number> = {
+  easy: 0.05,
+  normal: 0.01,
+  hard: 0.001,
+};
+
+/** 1問ぶんの乗換回数レンジを抽選する。 */
+export function drawChallengeTransferRange(
+  difficulty: Difficulty,
+  rng: () => number = Math.random
+): { minTransfers: number; maxTransfers?: number } {
+  return rng() < CHALLENGE_ZERO_TRANSFER_PROBABILITY[difficulty]
+    ? CHALLENGE_ZERO_TRANSFER_RANGE
+    : CHALLENGE_TRANSFER_RANGE;
+}
 
 /** 難易度ごとの出題駅プール = 23区内の乗降客数上位N件の乗換グループ（null = 全グループ）。 */
 export const CHALLENGE_TOP_GROUPS: Record<Difficulty, number | null> = {
