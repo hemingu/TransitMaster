@@ -1,6 +1,13 @@
 import type { Network } from './types.ts';
-import { getNetworkIndex } from './networkIndex.ts';
+import { LINK_SEGMENT } from './types.ts';
+import { endpointStations, getNetworkIndex, incomingSegLine, outgoingSegLine } from './networkIndex.ts';
 
+/**
+ * 出題。origin / destination は「表示される駅」の駅レコード index。
+ * 端点は（乗換グループ＋表示駅名）で決まり、同じグループ内の同名レコードがすべて有効な端点になる
+ * （endpointStations）。同じグループでも駅名が違うレコード（金町と京成金町など）は端点にならない。
+ * 出題時に選ぶレコードは任意（同名なら端点集合は同じ）。
+ */
 export interface Question {
   origin: number;
   destination: number;
@@ -16,32 +23,40 @@ export interface QuestionOptions {
 const MAX_ATTEMPTS = 200;
 
 /**
- * 出発駅グループから到着駅グループまでの最小乗換回数を、パターン（有向）単位のラウンド探索で求める。
- * ラウンドk = 乗車k回目。出発グループの駅から乗れるパターン（乗車位置以降の停車駅が到達範囲）を
- * 乗り、到達したグループから次のラウンドで別のパターンに乗る。到着グループに着いたラウンド - 1 が乗換回数。
+ * 出発駅から到着駅までの最小乗換回数を、パターン（有向）単位のラウンド探索で求める。
+ * 端点は searchRoute と同じく（グループ＋駅名）: 最初の乗車は出発駅と同名の駅レコードからだけ、
+ * 到着は到着駅と同名の駅レコードに着いたときだけ。途中の乗換はグループ全体を使う。
+ * ラウンドk = 乗車k回目。乗れるパターン（乗車位置以降の停車駅が到達範囲）を乗り、到達した
+ * グループから次のラウンドで別のパターンに乗る。到着駅に着いたラウンド - 1 が乗換回数。
  * 直通運転（同一パターンで路線をまたぐ）は乗換に数えないため、searchRoute の 'transfers' モードの
  * 乗換回数と一致する。到達不可能な場合は null。
  */
-function minTransfersBetweenGroups(
+function minTransfersBetweenStations(
   network: Network,
-  originGroup: number,
-  destGroup: number
+  origin: number,
+  destination: number
 ): number | null {
-  if (originGroup === destGroup) return 0;
+  const originGroup = network.stations[origin].group;
+  if (originGroup === network.stations[destination].group) return 0;
 
   const index = getNetworkIndex(network);
+  const destStations = new Set(endpointStations(network, destination));
   const P = network.patterns.length;
   // パターンごとに「これまでに乗車した最小の位置」を覚え、より手前から乗れる場合だけ再走査する
   const boardedFrom = new Int32Array(P).fill(0x7fffffff);
+  // 到達済みグループ。出発グループへ戻っての乗換は考えない（searchRoute と同じ）
   const reached = new Set<number>([originGroup]);
-  let frontier: number[] = [originGroup];
+  // ラウンド1だけは出発駅と同名のレコードからのみ乗れる。以降は到達したグループ全体から乗れる。
+  let frontier: number[][] = [endpointStations(network, origin)];
 
   for (let round = 1; frontier.length > 0; round++) {
     const toScan = new Map<number, number>(); // pattern -> 最小の乗車位置
-    for (const g of frontier) {
-      for (const s of index.groupMembers.get(g) ?? []) {
+    for (const members of frontier) {
+      for (const s of members) {
         for (let k = index.stationNodeStart[s]; k < index.stationNodeStart[s + 1]; k++) {
           const node = index.stationNodeList[k];
+          // ラウンド1（出発駅と同名のレコード）は、直通リンクから始まる乗車を端点にしない（searchRoute と同じ）
+          if (round === 1 && outgoingSegLine(network, index, node) === LINK_SEGMENT) continue;
           const p = index.nodePattern[node];
           const pos = index.nodePos[node];
           if (pos < boardedFrom[p] && pos < (toScan.get(p) ?? Number.POSITIVE_INFINITY)) {
@@ -50,7 +65,7 @@ function minTransfersBetweenGroups(
         }
       }
     }
-    const next: number[] = [];
+    const next: number[][] = [];
     for (const [p, pos] of toScan) {
       boardedFrom[p] = pos;
       const start = index.patOffset[p];
@@ -58,14 +73,22 @@ function minTransfersBetweenGroups(
       // 環状パターンは全停車駅に到達でき、それ以外は乗車位置より後ろの停車駅に到達できる
       const from = index.isRing[p] ? start : start + pos;
       for (let node = from; node < end; node++) {
+        // 乗車駅そのもの（環状を一周して戻るだけの乗車を含む）は降車ではない。直通リンクで着いたレコードも降車駅にできない。
+        const boardingNode = node === start + pos;
+        if (
+          !boardingNode &&
+          destStations.has(index.nodeStation[node]) &&
+          incomingSegLine(network, index, node) !== LINK_SEGMENT
+        ) {
+          return round - 1;
+        }
         const g = network.stations[index.nodeStation[node]].group;
         if (!reached.has(g)) {
           reached.add(g);
-          next.push(g);
+          next.push(index.groupMembers.get(g) ?? []);
         }
       }
     }
-    if (reached.has(destGroup)) return round - 1;
     frontier = next;
   }
   return null;
@@ -101,7 +124,7 @@ export function generateQuestion(
     const destGroup = network.stations[destination].group;
     if (originGroup === destGroup) continue;
 
-    const result = minTransfersBetweenGroups(network, originGroup, destGroup);
+    const result = minTransfersBetweenStations(network, origin, destination);
     if (result === null) continue;
     if (result < minTransfers) continue;
     if (maxTransfers !== undefined && result > maxTransfers) continue;

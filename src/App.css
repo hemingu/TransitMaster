@@ -424,7 +424,57 @@
 
 .builder-header {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+}
+
+/* ---- チャレンジ進捗バー ---- */
+.challenge-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.challenge-progress-bar {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+}
+
+.challenge-progress-seg {
+  flex: 1;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.challenge-progress-seg.done {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.challenge-progress-seg.current {
+  border: 2px solid var(--accent);
+  animation: challenge-pulse 1.4s ease-in-out infinite;
+}
+
+.challenge-progress-label {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes challenge-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .challenge-progress-seg.current {
+    animation: none;
+  }
 }
 
 /* ---- モード選択（チャレンジ / フリー） ---- */

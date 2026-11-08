@@ -39,6 +39,37 @@ export interface NetworkIndex {
 
 const cache = new WeakMap<Network, NetworkIndex>();
 
+/**
+ * 出題の端点（出発駅・到着駅）として扱う駅レコード一覧: 指定駅と「同じ乗換グループ かつ 同じ駅名」の全レコード。
+ * 表示される駅名が端点を決める。同名レコードは路線ごとに複数ありうる（例: 新宿）ので、それらはすべて有効な端点。
+ * 同じグループでも駅名が違うレコード（例: 金町と京成金町、新宿と新宿西口）は端点に含まれない
+ * （経路の途中での乗換にはグループ全体を使う）。指定駅自身を必ず含む。
+ */
+export function endpointStations(network: Network, stationIdx: number): number[] {
+  const st = network.stations[stationIdx];
+  if (!st) return [];
+  const members = getNetworkIndex(network).groupMembers.get(st.group) ?? [stationIdx];
+  return members.filter((m) => network.stations[m].name === st.name);
+}
+
+/** ノードから出る区間の路線（直通リンクなら LINK_SEGMENT、非環状パターンの終端なら undefined）。 */
+export function outgoingSegLine(network: Network, index: NetworkIndex, node: number): number | undefined {
+  return network.patterns[index.nodePattern[node]].segLine[index.nodePos[node]];
+}
+
+/**
+ * ノードへ入ってくる区間の路線（直通リンクなら LINK_SEGMENT、非環状パターンの先頭なら undefined）。
+ * 到着駅での降車は、入ってくる区間が直通リンクだと leg の末尾が（リンクを切り落として）
+ * 手前のレコードになってしまうため、リンクで着いたレコードは端点（降車駅）にできない。
+ */
+export function incomingSegLine(network: Network, index: NetworkIndex, node: number): number | undefined {
+  const p = index.nodePattern[node];
+  const pos = index.nodePos[node];
+  const segLine = network.patterns[p].segLine;
+  if (pos > 0) return segLine[pos - 1];
+  return index.isRing[p] ? segLine[segLine.length - 1] : undefined;
+}
+
 /** 次のノードid（同一パターン内。非環状の終端なら -1）。 */
 export function nextNode(index: NetworkIndex, node: number): number {
   const p = index.nodePattern[node];
@@ -107,8 +138,13 @@ export function getNetworkIndex(network: Network): NetworkIndex {
   const lineAdjacency: Map<number, number[]>[] = Array.from({ length: L }, () => new Map());
   for (const pattern of network.patterns) {
     for (let i = 0; i < pattern.segLine.length; i++) {
-      const line = pattern.segLine[i];
-      if (line === LINK_SEGMENT) continue;
+      let line = pattern.segLine[i];
+      if (line === LINK_SEGMENT) {
+        // 統合された路線の元の railway 同士をつなぐ直通リンク（両端が同じ路線のレコード）は、その路線内の隣接として扱う
+        const a = network.stations[pattern.stops[i]].line;
+        if (a !== network.stations[pattern.stops[i + 1]].line) continue;
+        line = a;
+      }
       const adj = lineAdjacency[line];
       const from = pattern.stops[i];
       const to = pattern.stops[i + 1];

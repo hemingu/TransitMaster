@@ -29,6 +29,26 @@ export interface TransferGroupOverrides {
   merge?: [string[], string[]][];
   /** 該当グループ内の全駅を出題の出発駅・到着駅にしない（noQuestion）。 */
   exclude?: string[][];
+  /**
+   * 駅名の上書き（MT3D の駅名 -> 採用する駅名）。ビルドの最初に適用するので、グループ化・端点判定・
+   * S12 照合はすべて上書き後の名前で行う（例: 押上の表記ゆれ統一）。キーに該当する駅が無ければビルドを失敗させる。
+   */
+  stationNameOverrides?: Record<string, string>;
+  /**
+   * 区間の路線の付け替え。railway 上の from〜to（駅名、両端含む。railway の stations 配列上の位置で範囲を決める）の
+   * 区間（両方向）を line（MT3D の railway id）の区間に付け替え、駅レコードも line の同名レコードに置き換える。
+   * 例: 成田スカイアクセス線の 京成上野〜京成高砂 は物理的には京成本線。
+   * 範囲の外の区間に接する駅は、範囲外側のレコードとの間に距離ゼロの直通リンクを挿入してつなぐ。
+   * 参照する railway・駅が存在しなければビルドを失敗させる。
+   */
+  segmentLineOverrides?: SegmentLineOverride[];
+}
+
+export interface SegmentLineOverride {
+  railway: string;
+  from: string;
+  to: string;
+  line: string;
 }
 
 export interface Mt3dTitle {
@@ -315,8 +335,27 @@ interface WorkPattern {
   ring: boolean;
 }
 
-export function buildMt3dNetwork(input: Mt3dInput): BuildResult {
+export function buildMt3dNetwork(rawInput: Mt3dInput): BuildResult {
   const log: string[] = [];
+
+  // ---- 0. 駅名の上書き（以降はすべて上書き後の名前で処理する） ----
+  const nameOv = rawInput.overrides?.stationNameOverrides ?? {};
+  const nameOvHit = new Set<string>();
+  const input: Mt3dInput = {
+    ...rawInput,
+    stations: rawInput.stations.map((st) => {
+      const ja = st.title?.ja;
+      if (ja !== undefined && Object.hasOwn(nameOv, ja)) {
+        nameOvHit.add(ja);
+        return { ...st, title: { ...st.title, ja: nameOv[ja] } };
+      }
+      return st;
+    }),
+  };
+  for (const k of Object.keys(nameOv)) {
+    if (!nameOvHit.has(k)) throw new Error(`overrides.stationNameOverrides「${k}」に該当する駅がありません`);
+  }
+  if (nameOvHit.size > 0) log.push(`駅名の上書き: ${[...nameOvHit].map((k) => `${k}->${nameOv[k]}`).join('、')}`);
 
   // ---- 1. 路線・駅レコードの索引 ----
   const railwayIndex = new Map<string, number>();
@@ -332,6 +371,20 @@ export function buildMt3dNetwork(input: Mt3dInput): BuildResult {
   });
   const ignoredStations = validStation.filter((v) => !v).length;
   if (ignoredStations > 0) log.push(`路線・座標・駅名のない駅レコード ${ignoredStations} 件を無視しました`);
+
+  // 同名かつ同事業者の路線は1つの路線にまとめる（代表 = 最小の添字の railway）。
+  const canonByKey = new Map<string, number>();
+  const canon: number[] = input.railways.map((r, i) => {
+    const key = `${r.title.ja ?? r.id}|${operatorName(r.id)}`;
+    const rep = canonByKey.get(key);
+    if (rep !== undefined) return rep;
+    canonByKey.set(key, i);
+    return i;
+  });
+  const mergedRailways = input.railways.filter((_, i) => canon[i] !== i);
+  if (mergedRailways.length > 0) {
+    log.push(`同名・同事業者の路線を統合: ${mergedRailways.map((r) => `${r.id}->${input.railways[canon[railwayIndex.get(r.id)!]].id}`).join('、')}`);
+  }
 
   // 環状路線（stations[0] === stations[last]）
   const ringRailways = new Set<number>();
@@ -504,7 +557,7 @@ export function buildMt3dNetwork(input: Mt3dInput): BuildResult {
           nodes.push({ record: t.stn[0], time });
           continue;
         }
-        if (i > 0) segRailway.push(t.railway);
+        if (i > 0) segRailway.push(canon[t.railway]);
         nodes.push({ record: t.stn[i], time });
       }
     }
@@ -534,6 +587,9 @@ export function buildMt3dNetwork(input: Mt3dInput): BuildResult {
     if (!covered.has(t.id)) startFrom(t);
   }
   log.push(`運用(run): ${runs.length} 本（列車 ${allTrains.length} 本）`);
+
+  // ---- 3.5 区間の路線の付け替え（segmentLineOverrides） ----
+  applySegmentLineOverrides(input, runs, railwayIndex, canon, log);
 
   // ---- 4. 同一(駅, 区間路線)列の運用をまとめ、最速の運用を採用 ----
   const bestByKey = new Map<string, WorkPattern>();
@@ -567,7 +623,7 @@ export function buildMt3dNetwork(input: Mt3dInput): BuildResult {
     ringPatterns.push({
       stops: train.stn.slice(),
       segSec,
-      segLine: new Array<number>(n - 1).fill(train.railway),
+      segLine: new Array<number>(n - 1).fill(canon[train.railway]),
       total: times[n - 1] - times[0],
       ring: true,
     });
@@ -633,6 +689,8 @@ export function buildMt3dNetwork(input: Mt3dInput): BuildResult {
     for (const l of p.segLine) if (l !== LINK_SEGMENT) usedRailways.add(l);
     for (const s of p.stops) usedRecords.add(s);
   }
+  // 使う駅レコードの路線（統合後）は、区間がなくても路線として残す
+  for (const r of usedRecords) usedRailways.add(canon[railwayIndex.get(input.stations[r].railway!)!]);
   const lineNewIndex = new Map<number, number>();
   const lines: Line[] = [];
   input.railways.forEach((r, i) => {
@@ -767,7 +825,7 @@ export function buildMt3dNetwork(input: Mt3dInput): BuildResult {
       lon: Math.round(s.coord![0] * 100000) / 100000,
       lat: Math.round(s.coord![1] * 100000) / 100000,
       group: g,
-      line: lineNewIndex.get(railwayIndex.get(s.railway!)!)!,
+      line: lineNewIndex.get(canon[railwayIndex.get(s.railway!)!])!,
     };
     if (noQuestion.has(root)) st.noQuestion = true;
     return st;
@@ -843,6 +901,100 @@ export function buildMt3dNetwork(input: Mt3dInput): BuildResult {
     transferSec: TRANSFER_SEC,
   };
   return { network, log };
+}
+
+/**
+ * segmentLineOverrides を運用(run)に適用する（runs を直接書き換える）。
+ * 範囲内の区間は路線を付け替え、両端の駅レコードを付け替え先路線の同名レコードに置き換える。
+ * 駅レコードが区間ごとに食い違う箇所（範囲の境界）には距離ゼロの直通リンクを挿入する。
+ */
+function applySegmentLineOverrides(
+  input: Mt3dInput,
+  runs: Run[],
+  railwayIndex: Map<string, number>,
+  canon: number[],
+  log: string[]
+): void {
+  const list = input.overrides?.segmentLineOverrides ?? [];
+  if (list.length === 0) return;
+  const nameOf = (id: string): string | undefined => input.stations.find((x) => x.id === id)?.title?.ja;
+  const recordIdx = new Map<string, number>();
+  input.stations.forEach((st, i) => recordIdx.set(st.id, i));
+
+  interface Rule {
+    /** 付け替え元の railway（統合後の添字）。 */
+    src: number;
+    /** 付け替え先の railway（統合後の添字）。 */
+    dst: number;
+    /** 範囲内の駅レコード（入力 stations の添字）-> 付け替え先の同名レコード。 */
+    map: Map<number, number>;
+  }
+  const rules: Rule[] = [];
+  for (const o of list) {
+    const label = `segmentLineOverrides ${o.railway} ${o.from}-${o.to}`;
+    const src = railwayIndex.get(o.railway);
+    const dst = railwayIndex.get(o.line);
+    if (src === undefined) throw new Error(`${label}: railway ${o.railway} が存在しません`);
+    if (dst === undefined) throw new Error(`${label}: line ${o.line} が存在しません`);
+    const ids = input.railways[src].stations;
+    const posOf = (name: string): number => {
+      const p = ids.findIndex((id) => nameOf(id) === name);
+      if (p < 0) throw new Error(`${label}: 駅「${name}」が ${o.railway} にありません`);
+      return p;
+    };
+    const a = posOf(o.from);
+    const b = posOf(o.to);
+    const map = new Map<number, number>();
+    for (let p = Math.min(a, b); p <= Math.max(a, b); p++) {
+      const name = nameOf(ids[p]);
+      const target = input.railways[dst].stations.find((id) => nameOf(id) === name);
+      if (target === undefined) throw new Error(`${label}: 駅「${name}」が ${o.line} にありません`);
+      const rec = recordIdx.get(ids[p]);
+      const trec = recordIdx.get(target);
+      if (rec === undefined || trec === undefined) throw new Error(`${label}: 駅レコード ${ids[p]} / ${target} が stations にありません`);
+      map.set(rec, trec);
+    }
+    rules.push({ src: canon[src], dst: canon[dst], map });
+  }
+
+  let changedSegs = 0;
+  for (const run of runs) {
+    const n = run.nodes.length;
+    // 区間ごとの付け替え後 (路線, 始点レコード, 終点レコード)
+    const segs = run.segRailway.map((line, i) => {
+      let from = run.nodes[i].record;
+      let to = run.nodes[i + 1].record;
+      let ln = line;
+      for (const r of rules) {
+        if (line === r.src && r.map.has(from) && r.map.has(to)) {
+          from = r.map.get(from)!;
+          to = r.map.get(to)!;
+          ln = r.dst;
+          changedSegs++;
+          break;
+        }
+      }
+      return { line: ln, from, to, sec: 0 };
+    });
+    if (!segs.some((s, i) => s.line !== run.segRailway[i])) continue;
+    const nodes: RunNode[] = [];
+    const segRailway: number[] = [];
+    nodes.push({ record: segs[0].from, time: run.nodes[0].time });
+    for (let i = 0; i < n - 1; i++) {
+      const cur = nodes[nodes.length - 1];
+      // 元から直通リンクの区間は、始点が付け替えで変わっても二重にリンクを挟まず、そのまま前のレコードから張る
+      if (run.segRailway[i] !== LINK_SEGMENT && cur.record !== segs[i].from) {
+        // 境界: 距離ゼロの直通リンクを挿入
+        segRailway.push(LINK_SEGMENT);
+        nodes.push({ record: segs[i].from, time: cur.time });
+      }
+      segRailway.push(segs[i].line);
+      nodes.push({ record: segs[i].to, time: run.nodes[i + 1].time });
+    }
+    run.nodes = nodes;
+    run.segRailway = segRailway;
+  }
+  log.push(`区間の路線の付け替え: ${list.length} 件の設定で ${changedSegs} 区間（運用内）を付け替え`);
 }
 
 function compareArrays(a: number[], b: number[]): number {

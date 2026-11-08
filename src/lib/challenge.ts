@@ -36,7 +36,6 @@ export function buildShareText(difficulty: Difficulty, correct: number): string 
     `人力路線検索マスター チャレンジ【${difficultyShortLabel(difficulty)}】`,
     `${CHALLENGE_QUESTION_COUNT}問中 ${correct}問正解🎉 称号：${challengeTitle(correct)}`,
     '',
-    'あなたは何問解ける？👇',
     '#人力路線検索マスター',
   ].join('\n');
 }
@@ -54,13 +53,15 @@ export interface ChallengeRecord {
   destination: number;
   legs: RouteLeg[];
   valid: boolean;
+  /** 「回答スキップ」で飛ばした問題か（不正解扱い。valid は false、legs は空）。 */
+  skipped: boolean;
   invalidReason?: string;
   invalidLegIndex?: number;
   evaluation: RouteEvaluation | null;
   /** 模範解答の計算が完了したか。 */
   referenceReady: boolean;
   reference: Itinerary | null;
-  /** 判定レベル。経路が無効なら 'invalid'、模範解答の計算待ちなら null。 */
+  /** 判定レベル。経路が無効・スキップなら 'invalid'、模範解答の計算待ちなら null。 */
   level: JudgementLevel | null;
 }
 

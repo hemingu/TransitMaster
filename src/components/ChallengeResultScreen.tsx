@@ -14,6 +14,7 @@ import {
   DIFFICULTY_LABELS,
   formatEstimatedDuration,
   formatRouteLegs,
+  formatPlayerRouteLegs,
   reasonMessage,
   stationDisplayName,
 } from '../lib/game.ts';
@@ -83,26 +84,30 @@ export function ChallengeResultScreen({
                   {stationDisplayName(network, r.destination)}
                 </span>
                 <span className="challenge-row-verdict">
-                  {ok ? '○正解' : '×不正解'}
+                  {ok ? '○正解' : r.skipped ? '−スキップ' : '×不正解'}
                 </span>
               </button>
               {open && (
                 <div className="challenge-row-body">
                   <div className="comparison-col">
                     <h2>あなたの経路</h2>
-                    {!r.valid && (
+                    {r.skipped && <p className="muted">スキップしました</p>}
+                    {!r.valid && !r.skipped && (
                       <p className="result-reason">
                         {reasonMessage(
                           network,
                           r.legs,
                           r.invalidReason,
-                          r.invalidLegIndex
+                          r.invalidLegIndex,
+                          r
                         )}
                       </p>
                     )}
-                    <p className="answer-route">
-                      {formatRouteLegs(network, r.legs)}
-                    </p>
+                    {!r.skipped && (
+                      <p className="answer-route">
+                        {formatPlayerRouteLegs(network, r.legs)}
+                      </p>
+                    )}
                     {r.evaluation && (
                       <ul className="stat-list">
                         <li>乗換回数: {r.evaluation.transfers}回</li>

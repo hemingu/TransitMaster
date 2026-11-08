@@ -3,8 +3,10 @@ import {
   buildLeg,
   buildLineOptions,
   buildStationOptions,
+  markThroughStationOptions,
   stationDisplayName,
 } from '../lib/game.ts';
+import { endpointStations } from '../lib/networkIndex.ts';
 import type { Network, RouteLeg } from '../lib/types.ts';
 import { AutocompleteInput } from './AutocompleteInput.tsx';
 import { LineBadge } from './LineBadge.tsx';
@@ -22,8 +24,9 @@ interface RouteBuilderScreenProps {
   onUndo: () => void;
   onReset: () => void;
   onSubmit: () => void;
+  onSkip: () => void;
   onBackToTop: () => void;
-  /** チャレンジモード時の進捗。指定すると連続正解・通算の代わりに「チャレンジ n/m」を表示する。 */
+  /** チャレンジモード時の進捗。指定すると連続正解・通算の代わりに進捗バーを表示する（正誤は明かさない）。 */
   challengeProgress?: { current: number; total: number };
 }
 
@@ -40,14 +43,17 @@ export function RouteBuilderScreen({
   onUndo,
   onReset,
   onSubmit,
+  onSkip,
   onBackToTop,
   challengeProgress,
 }: RouteBuilderScreenProps) {
   const [selectedLine, setSelectedLine] = useState<number | null>(null);
 
-  const currentGroup = network.stations[currentStation].group;
-  const destinationGroup = network.stations[destination].group;
-  const reachedDestination = currentGroup === destinationGroup;
+  // 到着駅は「同じ乗換グループ・同じ駅名」のレコード（グループ内の別名駅は到着にならない）
+  const reachedDestination = useMemo(
+    () => endpointStations(network, destination).includes(currentStation),
+    [network, destination, currentStation]
+  );
 
   // 路線候補は全路線。プレイヤーが路線名を自力で思い出して入力するゲーム性のため、
   // 現在駅を通らない路線もあえて候補に含める（間違いは回答時に判定される）。
@@ -55,7 +61,15 @@ export function RouteBuilderScreen({
 
   // 降車駅候補は全駅（グループ＝物理駅単位で重複排除）。選択路線に依存しない静的リスト。
   // 同名別駅（例: 別の場所にある同名の浅草）は乗り入れ路線名の note で区別する（一意な駅名は note なし）。
-  const stationOptions = useMemo(() => buildStationOptions(network), [network]);
+  const baseStationOptions = useMemo(() => buildStationOptions(network), [network]);
+  // 選んだ路線に現在駅で乗ってそのまま直通先で着ける駅には「〇〇線直通」の印を付ける
+  const stationOptions = useMemo(
+    () =>
+      selectedLine === null
+        ? baseStationOptions
+        : markThroughStationOptions(network, baseStationOptions, selectedLine, currentStation),
+    [network, baseStationOptions, selectedLine, currentStation]
+  );
 
   function handleSelectLine(lineIdx: number) {
     setSelectedLine(lineIdx);
@@ -84,9 +98,33 @@ export function RouteBuilderScreen({
     <div className="screen builder-screen">
       <div className="score-bar">
         {challengeProgress ? (
-          <span>
-            チャレンジ {challengeProgress.current}/{challengeProgress.total}
-          </span>
+          <div className="challenge-progress">
+            <div
+              className="challenge-progress-bar"
+              role="progressbar"
+              aria-label="チャレンジの進捗"
+              aria-valuemin={0}
+              aria-valuenow={challengeProgress.current}
+              aria-valuemax={challengeProgress.total}
+              aria-valuetext={`${challengeProgress.total}問中${challengeProgress.current}問目`}
+            >
+              {Array.from({ length: challengeProgress.total }, (_, i) => (
+                <span
+                  key={i}
+                  className={`challenge-progress-seg${
+                    i + 1 < challengeProgress.current
+                      ? ' done'
+                      : i + 1 === challengeProgress.current
+                        ? ' current'
+                        : ''
+                  }`}
+                />
+              ))}
+            </div>
+            <span className="challenge-progress-label">
+              {challengeProgress.current}/{challengeProgress.total}
+            </span>
+          </div>
         ) : (
           <>
             <span>連続正解: {streak}</span>
@@ -98,6 +136,9 @@ export function RouteBuilderScreen({
       </div>
 
       <div className="builder-header">
+        <button type="button" className="link-button" onClick={onSkip}>
+          回答スキップ
+        </button>
         <button
           type="button"
           className="link-button"

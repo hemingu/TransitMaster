@@ -1,6 +1,7 @@
 import {
   formatEstimatedDuration,
   formatRouteLegs,
+  formatPlayerRouteLegs,
   reasonMessage,
 } from '../lib/game.ts';
 import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from '../lib/types.ts';
@@ -16,6 +17,10 @@ interface ResultScreenProps {
   valid: boolean;
   invalidReason?: string;
   invalidLegIndex?: number;
+  /** 出発駅・到着駅（不正解メッセージで駅名を示すため）。 */
+  endpoints?: { origin: number; destination: number };
+  /** 「回答スキップ」で飛ばした問題か。 */
+  skipped?: boolean;
   evaluation: RouteEvaluation | null;
   reference: Itinerary | null;
   judgement: Judgement | null;
@@ -96,6 +101,8 @@ export function ResultScreen({
   valid,
   invalidReason,
   invalidLegIndex,
+  endpoints,
+  skipped,
   evaluation,
   reference,
   judgement,
@@ -113,11 +120,17 @@ export function ResultScreen({
 
       {!valid ? (
         <div className="result-card incorrect">
-          <h1>不正解</h1>
-          <p className="result-reason">
-            {reasonMessage(network, legs, invalidReason, invalidLegIndex)}
-          </p>
-          <p className="answer-route">あなたの経路: {formatRouteLegs(network, legs)}</p>
+          <h1>{skipped ? 'スキップ' : '不正解'}</h1>
+          {skipped ? (
+            <p className="judgement-message">スキップしました</p>
+          ) : (
+            <>
+              <p className="result-reason">
+                {reasonMessage(network, legs, invalidReason, invalidLegIndex, endpoints)}
+              </p>
+              <p className="answer-route">あなたの経路: {formatPlayerRouteLegs(network, legs)}</p>
+            </>
+          )}
 
           {/* 経路が無効でも「正しくはどう行くのか」を学べるよう模範解答を表示する */}
           <div className="comparison">
@@ -136,7 +149,7 @@ export function ResultScreen({
           <div className="comparison">
             <div className="comparison-col">
               <h2>あなたの経路（{MODE_LABELS[mode]}モードで判定）</h2>
-              <p className="answer-route">{formatRouteLegs(network, legs)}</p>
+              <p className="answer-route">{formatPlayerRouteLegs(network, legs)}</p>
               {evaluation && (
                 <ul className="stat-list">
                   <li>乗換回数: {evaluation.transfers}回</li>

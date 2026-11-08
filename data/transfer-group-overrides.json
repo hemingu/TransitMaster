@@ -30,5 +30,13 @@
     ["松田", "新松田"],
     ["東池袋", "東池袋四丁目"],
     ["雑司が谷", "鬼子母神前"]
+  ],
+  "stationNameOverrides": {
+    "押上(スカイツリー前)": "押上",
+    "押上〈スカイツリー前〉": "押上"
+  },
+  "segmentLineOverrides": [
+    { "railway": "Keisei.NaritaSkyAccess", "from": "京成上野", "to": "京成高砂", "line": "Keisei.Main" },
+    { "railway": "Keikyu.Airport", "from": "品川", "to": "京急蒲田", "line": "Keikyu.Main" }
   ]
 }

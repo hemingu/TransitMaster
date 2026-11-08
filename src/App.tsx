@@ -34,6 +34,7 @@ interface AnswerResult {
   valid: boolean;
   invalidReason?: string;
   invalidLegIndex?: number;
+  skipped?: boolean;
   evaluation: RouteEvaluation | null;
 }
 
@@ -206,22 +207,26 @@ function App() {
   }
 
   /** チャレンジモードの回答: 結果画面を挟まず記録して次の問題へ。模範解答はバックグラウンドで計算する。 */
-  function handleChallengeSubmit() {
+  function handleChallengeSubmit(skipped = false) {
     if (!network || !question || !challenge) return;
     const id = challengeIdRef.current;
     const index = challenge.records.length;
-    const validation = validateRoute(network, question.origin, question.destination, legs);
+    const validation = skipped
+      ? null
+      : validateRoute(network, question.origin, question.destination, legs);
     dispatchChallenge({
       type: 'answer',
       id,
       record: {
         origin: question.origin,
         destination: question.destination,
-        legs,
-        valid: validation.valid,
-        invalidReason: validation.valid ? undefined : validation.reason,
-        invalidLegIndex: validation.valid ? undefined : validation.legIndex,
-        evaluation: validation.valid ? evaluateRoute(network, legs, CHALLENGE_MODE) : null,
+        legs: skipped ? [] : legs,
+        valid: validation?.valid ?? false,
+        skipped,
+        invalidReason: validation && !validation.valid ? validation.reason : undefined,
+        invalidLegIndex: validation && !validation.valid ? validation.legIndex : undefined,
+        evaluation:
+          validation?.valid ? evaluateRoute(network, legs, CHALLENGE_MODE) : null,
       },
     });
     // 待たずに次へ進み、模範解答は届いた時点で記録に反映する（古いチャレンジの結果はリデューサーが無視）
@@ -285,6 +290,22 @@ function App() {
     setReferenceLoading(false);
   }
 
+  /** 回答スキップ: チャレンジでは不正解として記録して次へ、フリーでは結果画面（模範解答のみ）を表示する。 */
+  async function handleSkip() {
+    if (challenge) {
+      handleChallengeSubmit(true);
+      return;
+    }
+    if (!network || !question) return;
+    setLegs([]);
+    setAnswerResult({ valid: false, skipped: true, evaluation: null });
+    setTotalAnswered((n) => n + 1);
+    setStreak(0);
+    setScreen('result');
+    await loadReference(question.origin, question.destination);
+    setReferenceLoading(false);
+  }
+
   function handleBackToTop() {
     challengeIdRef.current = 0;
     dispatchChallenge({ type: 'clear' });
@@ -343,6 +364,7 @@ function App() {
         onUndo={handleUndo}
         onReset={handleReset}
         onSubmit={handleSubmit}
+        onSkip={handleSkip}
         onBackToTop={handleBackToTop}
         challengeProgress={
           challenge
@@ -376,6 +398,8 @@ function App() {
         valid={answerResult.valid}
         invalidReason={answerResult.invalidReason}
         invalidLegIndex={answerResult.invalidLegIndex}
+        endpoints={question ?? undefined}
+        skipped={answerResult.skipped}
         evaluation={answerResult.evaluation}
         reference={reference}
         judgement={judgement}

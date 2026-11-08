@@ -1,5 +1,6 @@
 import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from './types.ts';
-import { getNetworkIndex } from './networkIndex.ts';
+import { endpointStations, getNetworkIndex } from './networkIndex.ts';
+import { evaluateRoute, ridableStationsOnLine } from './validate.ts';
 import type { AutocompleteOption } from './autocomplete.ts';
 import { normalizeRomaji } from './romaji.ts';
 import { companySearchTerms } from './companyReadings.ts';
@@ -135,6 +136,40 @@ export function buildStationOptions(network: Network): AutocompleteOption[] {
   });
 }
 
+/**
+ * 降車駅候補（buildStationOptions）に、「選んだ路線に現在駅で乗ってそのまま直通先で着ける駅」の印を付ける。
+ * 該当する駅の候補は id を直通先の路線上の駅レコードにし、note に「（直通先の路線名）直通」を足す
+ * （例: 半蔵門線を永田町で選んだとき、三軒茶屋に「田園都市線直通」）。
+ * 選んだ路線自身の駅（同グループ・同駅名のレコードが路線上にある）は対象外。方向は有向で考える。
+ */
+export function markThroughStationOptions(
+  network: Network,
+  options: AutocompleteOption[],
+  lineIdx: number,
+  currentStation: number
+): AutocompleteOption[] {
+  const from = stationOnLineInGroup(network, lineIdx, currentStation);
+  if (from === null) return options;
+  const key = (s: number) => `${network.stations[s].group}\u0000${network.stations[s].name}`;
+  const ownKeys = new Set<string>();
+  for (const s of getNetworkIndex(network).lineStations[lineIdx]) ownKeys.add(key(s));
+  const through = new Map<string, number[]>();
+  for (const s of ridableStationsOnLine(network, lineIdx, from)) {
+    if (network.stations[s].line === lineIdx || ownKeys.has(key(s))) continue;
+    const arr = through.get(key(s));
+    if (arr) arr.push(s);
+    else through.set(key(s), [s]);
+  }
+  if (through.size === 0) return options;
+  return options.map((option) => {
+    const recs = through.get(key(option.id));
+    if (!recs) return option;
+    const names = [...new Set(recs.map((r) => network.lines[network.stations[r].line].name))];
+    const label = names.map((n) => `${n}直通`).join('・');
+    return { ...option, id: recs[0], note: option.note ? `${option.note} ${label}` : label };
+  });
+}
+
 /** 指定駅（グループ）を通る路線のインデックス一覧を重複なく返す */
 export function linesThroughStation(network: Network, stationIdx: number): number[] {
   const group = network.stations[stationIdx]?.group;
@@ -175,6 +210,8 @@ export function stationsOnLine(
 
 /**
  * 指定駅と同一グループの駅のうち、指定路線の駅レコードである駅 index を返す。見つからなければ null。
+ * 同じグループ・同じ路線に複数レコードがあるとき（例: 大江戸線の 新宿 と 新宿西口）は、
+ * 指定駅と同じ駅名のレコードを優先する（出発・到着の端点は駅名で決まるため）。
  *
  * Station は路線ごとに別レコードのため（例: 東京(山手線) と 東京(丸ノ内線) は
  * 同一グループだが別 index）、直前の路線で降りた駅 index をそのまま次の路線の
@@ -191,10 +228,13 @@ export function stationOnLineInGroup(
   if (!line || !station) return null;
 
   const members = getNetworkIndex(network).groupMembers.get(station.group) ?? [stationIdx];
+  let fallback: number | null = null;
   for (const m of members) {
-    if (network.stations[m].line === lineIdx) return m;
+    if (network.stations[m].line !== lineIdx) continue;
+    if (network.stations[m].name === station.name) return m;
+    fallback ??= m;
   }
-  return null;
+  return fallback;
 }
 
 /**
@@ -202,9 +242,14 @@ export function stationOnLineInGroup(
  * from（現在駅）・to（降車駅）をそれぞれ選択路線上の駅 index にマップした
  * RouteLeg を返す。
  *
+ * - from（現在駅）: 同名レコードを優先し、無ければ同グループの別名レコードに乗り換える
+ *   （例: 金町(常磐線)で降りて 京成金町(京成線) に乗る）。
+ * - to（降車駅）: プレイヤーが入力した駅名のレコードだけを使う。選択路線にその駅名の
+ *   レコードが無ければ別名のレコードへ黙ってすり替えず、元の index のまま返す
+ *   （回答時に validateRoute が 'station-not-on-line' で不正解にする。例: 常磐線に「京成金町」）。
+ *
  * 路線・降車駅は全候補から自由入力で選べるため、選択路線上に存在しない駅が渡されうる。
- * その場合はマッピングを諦めて元の駅 index をそのまま使う。即時エラーにはせず、
- * 回答時に validateRoute が 'station-not-on-line' 等の理由付きで不正解と判定する
+ * 即時エラーにはせず、回答時に validateRoute が理由付きで不正解と判定する
  * （プレイヤーが路線名・駅名を自力で思い出すゲーム性のため、入力時点では正誤を明かさない）。
  */
 export function buildLeg(
@@ -214,8 +259,16 @@ export function buildLeg(
   toStation: number
 ): RouteLeg {
   const from = stationOnLineInGroup(network, lineIdx, fromStation) ?? fromStation;
-  const to = stationOnLineInGroup(network, lineIdx, toStation) ?? toStation;
-  return { line: lineIdx, from, to };
+  const toName = network.stations[toStation]?.name;
+  const mappedTo = stationOnLineInGroup(network, lineIdx, toStation);
+  if (mappedTo !== null && network.stations[mappedTo].name === toName) {
+    return { line: lineIdx, from, to: mappedTo };
+  }
+  // 選択路線の駅でなくても、その路線に乗ってそのまま直通先に着く駅（同グループ・同駅名のレコード）なら
+  // 直通先の路線上のレコードを使う（例: 半蔵門線 永田町→三軒茶屋）
+  const ridable = ridableStationsOnLine(network, lineIdx, from);
+  const throughTo = [toStation, ...endpointStations(network, toStation)].find((s) => ridable.includes(s));
+  return { line: lineIdx, from, to: throughTo ?? toStation };
 }
 
 /** インクリメンタル絞り込み: クエリ文字列を含む駅名のみを残す（大小文字区別なし、簡易） */
@@ -233,7 +286,8 @@ export function reasonMessage(
   network: Network,
   legs: RouteLeg[],
   reason: string | undefined,
-  legIndex: number | undefined
+  legIndex: number | undefined,
+  endpoints?: { origin: number; destination: number }
 ): string {
   if (reason === undefined) return '';
   const leg = legIndex !== undefined ? legs[legIndex] : undefined;
@@ -245,9 +299,13 @@ export function reasonMessage(
     case 'empty':
       return '経路が組み立てられていません。乗車区間を追加してください。';
     case 'wrong-origin':
-      return `最初の乗車駅「${fromName}」が出発駅と異なります。`;
+      return endpoints
+        ? `最初の乗車駅「${fromName}」が出発駅「${stationDisplayName(network, endpoints.origin)}」と異なります（同じ乗換駅でも駅名が違う駅からは出発できません）。`
+        : `最初の乗車駅「${fromName}」が出発駅と異なります。`;
     case 'wrong-destination':
-      return `最後の降車駅「${toName}」が到着駅と異なります。`;
+      return endpoints
+        ? `最後の降車駅「${toName}」が到着駅「${stationDisplayName(network, endpoints.destination)}」と異なります（同じ乗換駅でも駅名が違う駅では到着になりません）。`
+        : `最後の降車駅「${toName}」が到着駅と異なります。`;
     case 'station-not-on-line':
       return `「${fromName}」または「${toName}」は${lineName}の駅ではありません。`;
     case 'not-connected-on-line':
@@ -340,22 +398,92 @@ export function judgeAnswer(
   };
 }
 
+/** 表示用の区間。通し運転で路線名が同じ区間（事業者違いを含む）を1つにまとめたもの。 */
+export interface DisplayLeg {
+  /** 先頭の区間の路線（line index）。 */
+  line: number;
+  /** まとめた区間の路線名（重複なし・順序保持）。単独なら "路線名（事業者名）"、複数事業者なら "路線名（A・B）"。 */
+  label: string;
+  from: number;
+  to: number;
+  /** 最後にまとめた区間の路線（直通先の注記判定用）。 */
+  lastLine: number;
+  through?: boolean;
+  /** 乗車秒の合計（入力に rideSec があるときのみ）。 */
+  rideSec?: number;
+}
+
+/**
+ * 連続する区間のうち、直通（through=true）でつながり、路線名が等しいもの（事業者が違ってもよい。
+ * 例: 東海道線 JR東日本 ＝直通＝ 東海道線 JR東海）を1区間にまとめる。実際の乗換をはさむ区間はまとめない。
+ */
+export function mergeThroughLegsByName(
+  network: Network,
+  legs: (RouteLeg & { through?: boolean; rideSec?: number })[]
+): DisplayLeg[] {
+  const out: DisplayLeg[] = [];
+  const companies: string[][] = [];
+  for (const leg of legs) {
+    const line = network.lines[leg.line];
+    const prev = out[out.length - 1];
+    if (prev && leg.through && line && network.lines[prev.lastLine]?.name === line.name) {
+      prev.to = leg.to;
+      prev.lastLine = leg.line;
+      if (leg.rideSec !== undefined) prev.rideSec = (prev.rideSec ?? 0) + leg.rideSec;
+      const cs = companies[companies.length - 1];
+      if (!cs.includes(line.company)) cs.push(line.company);
+      continue;
+    }
+    out.push({ line: leg.line, label: '', from: leg.from, to: leg.to, lastLine: leg.line, through: leg.through, rideSec: leg.rideSec });
+    companies.push(line ? [line.company] : []);
+  }
+  out.forEach((d, i) => {
+    const line = network.lines[d.line];
+    d.label = line ? `${line.name}（${companies[i].join('・')}）` : '不明な路線';
+  });
+  return out;
+}
+
 /**
  * 経路を表示用文字列に変換する
  * （例: "山手線（JR東日本） 東京→上野 ｜ 丸ノ内線（東京メトロ） 上野→新宿"）。
  * 直通運転（through 付きの区間）は「｜」ではなく「直通」でつなぐ。
+ * 直通で路線名が同じ区間は1区間にまとめる（mergeThroughLegsByName）。
  */
 export function formatRouteLegs(network: Network, legs: (RouteLeg & { through?: boolean })[]): string {
   if (legs.length === 0) return '（まだ経路がありません）';
   let out = '';
-  legs.forEach((leg, i) => {
-    const lineName = formatLineName(network, leg.line);
+  mergeThroughLegsByName(network, legs).forEach((leg, i) => {
     const fromName = stationDisplayName(network, leg.from);
     const toName = stationDisplayName(network, leg.to);
     if (i > 0) out += leg.through ? ' ＝直通＝ ' : ' ｜ ';
-    out += `${lineName} ${fromName}→${toName}`;
+    // 降車駅が別路線の駅（直通先まで乗り続けた区間）なら、直通先の路線名を添える
+    const toLine = network.stations[leg.to]?.line;
+    const throughNote =
+      toLine !== undefined && toLine !== leg.lastLine && network.lines[toLine]
+        ? `（${network.lines[toLine].name}直通）`
+        : '';
+    out += `${leg.label}${throughNote} ${fromName}→${toName}`;
   });
   return out;
+}
+
+/**
+ * プレイヤーの経路（through を持たない RouteLeg 列）に、直通（乗換なしでつながる）かどうかを付与する。
+ * 区間 i の先頭までの最小乗換回数が、区間 i-1 までと同じなら、境目は直通。
+ */
+export function annotateThrough(network: Network, legs: RouteLeg[]): (RouteLeg & { through?: boolean })[] {
+  const transfers: number[] = [];
+  for (let i = 0; i < legs.length; i++) {
+    const ev = evaluateRoute(network, legs.slice(0, i + 1), 'transfers');
+    transfers.push(ev.totalSec === null ? Number.NaN : ev.transfers);
+  }
+  return legs.map((leg, i) => (i > 0 && transfers[i] === transfers[i - 1] ? { ...leg, through: true } : { ...leg }));
+}
+
+/** プレイヤーの経路を表示用文字列に変換する（直通を判定してから formatRouteLegs）。 */
+export function formatPlayerRouteLegs(network: Network, legs: RouteLeg[]): string {
+  return formatRouteLegs(network, annotateThrough(network, legs));
 }
 
 /** Itinerary（模範解答）を表示用文字列に変換する */

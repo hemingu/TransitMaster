@@ -15,7 +15,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { searchRoute } from '../src/lib/raptor.ts';
-import { linesThroughStation, formatLineName, formatEstimatedDuration, stationDisplayName } from '../src/lib/game.ts';
+import { linesThroughStation, formatLineName, mergeThroughLegsByName, formatEstimatedDuration, stationDisplayName } from '../src/lib/game.ts';
 import type { AnswerMode, Network } from '../src/lib/types.ts';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -91,7 +91,12 @@ function resolveStation(network: Network, label: string, rawName: string): numbe
     process.exit(1);
   }
 
-  return representativeStation(network, groups[0]);
+  // 端点は「グループ＋入力した駅名」で決まる（searchRoute 側で同名レコードに展開される）ので、
+  // グループの先頭ではなく入力名と一致するレコードを起点にする。
+  const idx = network.stations.findIndex(
+    (s) => s.group === groups[0] && normalize(s.name) === normalized
+  );
+  return idx;
 }
 
 /** 1つのモードで探索を実行し、結果を出力する。 */
@@ -110,11 +115,10 @@ function runAndPrint(network: Network, from: number, to: number, mode: AnswerMod
   }
 
   console.log('経路:');
-  for (const leg of itinerary.legs) {
-    const lineName = formatLineName(network, leg.line);
+  for (const leg of mergeThroughLegsByName(network, itinerary.legs)) {
     const fromName = stationDisplayName(network, leg.from);
     const toName = stationDisplayName(network, leg.to);
-    console.log(`  ${leg.through ? '＝直通＝ ' : ''}${lineName} ${fromName}→${toName}（${Math.round(leg.rideSec / 60)}分）`);
+    console.log(`  ${leg.through ? '＝直通＝ ' : ''}${leg.label} ${fromName}→${toName}（${Math.round((leg.rideSec ?? 0) / 60)}分）`);
   }
   console.log(`乗換回数: ${itinerary.transfers}`);
   console.log(

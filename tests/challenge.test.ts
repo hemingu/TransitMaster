@@ -14,7 +14,7 @@ import type { Itinerary } from '../src/lib/types.ts';
 
 const ref = (transfers: number): Itinerary =>
   ({ legs: [], transfers, totalSec: 600 }) as unknown as Itinerary;
-const base = { origin: 0, destination: 1, legs: [] };
+const base = { origin: 0, destination: 1, legs: [], skipped: false };
 
 describe('challengeTitle', () => {
   it('正解数ごとの称号', () => {
@@ -36,7 +36,7 @@ describe('シェア', () => {
   });
   it('投稿本文', () => {
     expect(buildShareText('normal', 8)).toBe(
-      '東京23区の乗換、頭の中で何問解ける？\n人力路線検索マスター チャレンジ【ふつう】\n10問中 8問正解🎉 称号：路線図の住人\n\nあなたは何問解ける？👇\n#人力路線検索マスター'
+      '東京23区の乗換、頭の中で何問解ける？\n人力路線検索マスター チャレンジ【ふつう】\n10問中 8問正解🎉 称号：路線図の住人\n\n#人力路線検索マスター'
     );
     expect(buildShareText('hard', 10)).toContain('称号：人間路線検索エンジン');
     expect(buildShareText('easy', 3)).toContain('称号：迷子の旅人');
@@ -68,6 +68,21 @@ describe('challengeReducer', () => {
     s = answer(s, true);
     expect(s.records[1].level).toBeNull();
     expect(isChallengeFinished(s)).toBe(false);
+  });
+
+  it('スキップは不正解（invalid）として記録され、模範解答が来ても正解にならない', () => {
+    let s = challengeReducer(started, {
+      type: 'answer',
+      id: 1,
+      record: { ...base, valid: false, skipped: true, evaluation: null },
+    })!;
+    expect(s.records[0].skipped).toBe(true);
+    expect(s.records[0].level).toBe('invalid');
+    s = reference(s, 0, ref(1));
+    expect(s.records[0].referenceReady).toBe(true);
+    expect(s.records[0].reference).not.toBeNull();
+    expect(s.records[0].level).toBe('invalid');
+    expect(countCorrect(s.records)).toBe(0);
   });
 
   it('模範解答の到着で判定（perfect のみ正解）', () => {
