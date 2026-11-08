@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  CHALLENGE_DIFFICULTY_LABELS,
   CHALLENGE_QUESTION_COUNT,
   type ChallengeState,
   buildShareIntentUrl,
@@ -11,7 +12,6 @@ import {
   difficultyShortLabel,
 } from '../lib/challenge.ts';
 import {
-  DIFFICULTY_LABELS,
   formatEstimatedDuration,
   formatRouteLegs,
   formatPlayerRouteLegs,
@@ -58,7 +58,7 @@ export function ChallengeResultScreen({
     <div className="screen challenge-result-screen">
       <div className="result-card correct perfect challenge-summary">
         <p className="challenge-difficulty">
-          チャレンジ【{DIFFICULTY_LABELS[challenge.difficulty]}】
+          チャレンジ【{CHALLENGE_DIFFICULTY_LABELS[challenge.difficulty]}】
         </p>
         <h1 className="challenge-score">
           {CHALLENGE_QUESTION_COUNT}問中 {correct}問正解

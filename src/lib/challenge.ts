@@ -47,6 +47,13 @@ export const CHALLENGE_TOP_GROUPS: Record<Difficulty, number | null> = {
   hard: null,
 };
 
+/** チャレンジモードの難易度の表示名（設定画面・結果画面で共通）。 */
+export const CHALLENGE_DIFFICULTY_LABELS: Record<Difficulty, string> = {
+  easy: `かんたん（主要${CHALLENGE_TOP_GROUPS.easy}駅）`,
+  normal: `ふつう（主要${CHALLENGE_TOP_GROUPS.normal}駅）`,
+  hard: 'むずかしい（23区内の全駅）',
+};
+
 /** チャレンジの難易度に応じた出題候補の駅（index）。 */
 export function challengeStations(network: Network, difficulty: Difficulty): number[] {
   return filterStationsByTopGroups(
