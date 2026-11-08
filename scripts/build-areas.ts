@@ -2,9 +2,9 @@
  * エリア境界データ (src/data/areas.json) を生成するスクリプト。
  *
  * 公開オープンデータ（niiyz/JapanCityGeoJson の市区町村ポリゴン、dataofjapan/land の
- * 都道府県ポリゴン）を取得し、各エリア（東京23区内/東京都内/名古屋市内/大阪市内）ごとに
+ * 都道府県ポリゴン）を取得し、各エリア（東京23区内/東京都内）ごとに
  * 外環のみの MultiPolygon に統合、Douglas-Peucker で簡略化して出力する。
- * 'japan' はポリゴン不要（全駅対象のため areas.json には含めない）。
+ * 'mt3d'（首都圏: Mini Tokyo 3D収録範囲）はポリゴン不要（全駅対象のため areas.json には含めない）。
  *
  * ネットワークアクセスに失敗した場合は、主要駅を内包する程度の精度の手作り粗ポリゴンに
  * フォールバックする。
@@ -22,15 +22,6 @@ const OUTPUT_PATH = resolve(ROOT, 'src', 'data', 'areas.json');
 
 // 東京23区 (13101-13123)
 const TOKYO23_CODES = Array.from({ length: 23 }, (_, i) => `131${String(i + 1).padStart(2, '0')}`);
-// 名古屋市16区 (23101-23116)
-const NAGOYA_CODES = Array.from({ length: 16 }, (_, i) => `231${String(i + 1).padStart(2, '0')}`);
-// 大阪市24区 (27102-27128、欠番あり)
-const OSAKA_CODES = [
-  '27102', '27103', '27104', '27106', '27107', '27108', '27109', '27111', '27113', '27114',
-  '27115', '27116', '27117', '27118', '27119', '27120', '27121', '27122', '27123', '27124',
-  '27125', '27126', '27127', '27128',
-];
-
 const CITY_GEOJSON_BASE = 'https://raw.githubusercontent.com/niiyz/JapanCityGeoJson/master/geojson';
 const PREF_GEOJSON_URL = 'https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson';
 
@@ -191,7 +182,7 @@ function buildMultiPolygon(rings: Ring[], epsilonDeg: number): MultiPolygon {
 
 // ---- フォールバック用の手作り粗ポリゴン ----
 // 各エリアの主要駅を内包し、隣接する都市の主要駅を除外する程度の精度（10〜20頂点）。
-function fallbackAreas(): Record<'tokyo23' | 'tokyo' | 'nagoya' | 'osaka', MultiPolygon> {
+function fallbackAreas(): Record<'tokyo23' | 'tokyo', MultiPolygon> {
   // 東京23区: 荒川・多摩川・東京湾におおよそ沿った粗い外形
   const tokyo23Ring: Ring = [
     [139.56, 35.61], // 大田区南西
@@ -223,51 +214,17 @@ function fallbackAreas(): Record<'tokyo23' | 'tokyo' | 'nagoya' | 'osaka', Multi
     [138.94, 35.53],
   ];
 
-  // 名古屋市16区の粗い外形
-  const nagoyaRing: Ring = [
-    [136.82, 35.06], // 南区南西
-    [136.98, 35.08], // 緑区南東
-    [137.02, 35.15], // 名東区東
-    [136.98, 35.24], // 守山区北
-    [136.90, 35.26], // 北区北
-    [136.82, 35.22], // 中村区西
-    [136.78, 35.15], // 中川区西
-    [136.82, 35.06],
-  ];
-
-  // 大阪市24区の粗い外形
-  const osakaRing: Ring = [
-    [135.43, 34.58], // 住之江区南西
-    [135.52, 34.60], // 平野区南東
-    [135.56, 34.68], // 生野区東
-    [135.59, 34.75], // 鶴見区北東
-    [135.52, 34.78], // 旭区北
-    [135.44, 34.75], // 西淀川区北西
-    [135.40, 34.68], // 此花区西
-    [135.43, 34.58],
-  ];
-
   return {
     tokyo23: [[tokyo23Ring]],
     tokyo: [[tokyoRing]],
-    nagoya: [[nagoyaRing]],
-    osaka: [[osakaRing]],
   };
 }
 
-async function tryFetchAll(): Promise<Record<'tokyo23' | 'tokyo' | 'nagoya' | 'osaka', MultiPolygon> | null> {
+async function tryFetchAll(): Promise<Record<'tokyo23' | 'tokyo', MultiPolygon> | null> {
   try {
     console.log('東京23区のポリゴンを取得中...');
     const tokyo23Rings = await fetchCityOuterRings('13', TOKYO23_CODES);
     if (tokyo23Rings.length === 0) throw new Error('tokyo23: no rings fetched');
-
-    console.log('名古屋市のポリゴンを取得中...');
-    const nagoyaRings = await fetchCityOuterRings('23', NAGOYA_CODES);
-    if (nagoyaRings.length === 0) throw new Error('nagoya: no rings fetched');
-
-    console.log('大阪市のポリゴンを取得中...');
-    const osakaRings = await fetchCityOuterRings('27', OSAKA_CODES);
-    if (osakaRings.length === 0) throw new Error('osaka: no rings fetched');
 
     console.log('東京都のポリゴンを取得中(都道府県境界)...');
     const tokyoPrefRings = await fetchPrefectureOuterRings(13);
@@ -280,8 +237,6 @@ async function tryFetchAll(): Promise<Record<'tokyo23' | 'tokyo' | 'nagoya' | 'o
     return {
       tokyo23: buildMultiPolygon(tokyo23Rings, CITY_EPSILON),
       tokyo: buildMultiPolygon(tokyoPrefRings, PREF_EPSILON),
-      nagoya: buildMultiPolygon(nagoyaRings, CITY_EPSILON),
-      osaka: buildMultiPolygon(osakaRings, CITY_EPSILON),
     };
   } catch (err) {
     console.warn(`オープンデータ取得に失敗しました: ${(err as Error).message}`);
@@ -310,15 +265,12 @@ function pointInMultiPolygon(lon: number, lat: number, mp: MultiPolygon): boolea
   return false;
 }
 
-function validate(areas: Record<'tokyo23' | 'tokyo' | 'nagoya' | 'osaka', MultiPolygon>): void {
-  const checks: { name: string; lon: number; lat: number; expect: Partial<Record<'tokyo23' | 'tokyo' | 'nagoya' | 'osaka', boolean>> }[] = [
+function validate(areas: Record<'tokyo23' | 'tokyo', MultiPolygon>): void {
+  const checks: { name: string; lon: number; lat: number; expect: Partial<Record<'tokyo23' | 'tokyo', boolean>> }[] = [
     { name: '東京駅', lon: 139.767, lat: 35.681, expect: { tokyo23: true, tokyo: true } },
     { name: '新宿', lon: 139.700, lat: 35.690, expect: { tokyo23: true, tokyo: true } },
     { name: '吉祥寺', lon: 139.580, lat: 35.703, expect: { tokyo23: false, tokyo: true } },
     { name: '横浜', lon: 139.622, lat: 35.466, expect: { tokyo: false } },
-    { name: '名古屋駅', lon: 136.882, lat: 35.171, expect: { nagoya: true } },
-    { name: '大阪駅', lon: 135.495, lat: 34.702, expect: { osaka: true } },
-    { name: '京都駅', lon: 135.759, lat: 34.985, expect: { osaka: false } },
   ];
 
   let allOk = true;
@@ -369,9 +321,7 @@ async function main() {
     areas: {
       tokyo23: areas.tokyo23,
       tokyo: areas.tokyo,
-      nagoya: areas.nagoya,
-      osaka: areas.osaka,
-      // japan はポリゴン不要（全駅対象）
+      // mt3d はポリゴン不要（全駅対象）
     },
   };
 

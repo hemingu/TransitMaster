@@ -6,11 +6,11 @@ import type { AnswerMode, Itinerary, Network } from '../lib/types.ts';
 /**
  * routing.worker: UIスレッドから Network を一度だけ受け取り（init）、
  * 以後は探索リクエスト（search）を受けて searchRoute を実行し結果を返す。
- * 時刻の概念は廃止（駅間所要秒ベース）のため、search メッセージに departSec は含まない。
+ * 時刻の概念はなく（パターン上の区間所要秒ベース）、search メッセージに departSec は含まない。
  *
  * メッセージプロトコル:
  * - 受信 { type: 'init', network: Network }
- * - 受信 { type: 'search', requestId: number, from: number, to: number, mode: AnswerMode, excludeShinkansen?: boolean }
+ * - 受信 { type: 'search', requestId: number, from: number, to: number, mode: AnswerMode }
  * - 送信 { type: 'result', requestId: number, itinerary: Itinerary | null }
  * - 送信 { type: 'error', requestId?: number, message: string }
  */
@@ -26,8 +26,6 @@ export interface WorkerSearchMessage {
   from: number;
   to: number;
   mode: AnswerMode;
-  /** true のとき新幹線（lineType===1）を探索から除外する（「日本全国」以外のエリア用）。 */
-  excludeShinkansen?: boolean;
 }
 
 export type WorkerRequestMessage = WorkerInitMessage | WorkerSearchMessage;
@@ -69,9 +67,7 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
       return;
     }
     try {
-      const itinerary = searchRoute(network, data.from, data.to, data.mode, {
-        excludeShinkansen: data.excludeShinkansen === true,
-      });
+      const itinerary = searchRoute(network, data.from, data.to, data.mode);
       const resultMsg: WorkerResultMessage = {
         type: 'result',
         requestId: data.requestId,

@@ -30,7 +30,7 @@ interface AnswerResult {
   evaluation: RouteEvaluation | null;
 }
 
-const AREA_ORDER: AreaId[] = ['tokyo23', 'tokyo', 'nagoya', 'osaka', 'japan'];
+const AREA_ORDER: AreaId[] = ['tokyo23', 'tokyo', 'mt3d'];
 
 function App() {
   const [screen, setScreen] = useState<Screen>('loading');
@@ -67,7 +67,7 @@ function App() {
       })
       .then((data: Network & { formatVersion?: number }) => {
         if (cancelled) return;
-        if (data.formatVersion !== 2) {
+        if (data.formatVersion !== 3) {
           setLoadError(
             'network.json の形式が古いです。npm run build:network を実行してください。'
           );
@@ -89,9 +89,7 @@ function App() {
     const counts: Record<AreaId, number> = {
       tokyo23: 0,
       tokyo: 0,
-      nagoya: 0,
-      osaka: 0,
-      japan: 0,
+      mt3d: 0,
     };
     if (!network) return counts;
     for (const id of AREA_ORDER) {
@@ -100,10 +98,6 @@ function App() {
     return counts;
   }, [network]);
 
-  // ゲームルール: 新幹線（lineType===1）は「日本全国」エリアでのみ使用できる。
-  // それ以外のエリアでは出題・候補・模範解答のすべてから新幹線を除外する。
-  const excludeShinkansen = area !== 'japan';
-
   function startQuestion() {
     if (!network) return;
     const areaStations = stationsInArea(network, area);
@@ -111,7 +105,6 @@ function App() {
     const q = generateQuestion(network, areaStations, {
       minTransfers,
       maxTransfers,
-      excludeShinkansen,
     });
     if (!q) {
       setSetupError(
@@ -153,7 +146,7 @@ function App() {
     setReferenceLoading(true);
     setReference(null);
     setJudgement(null);
-    const itinerary = await search(origin, destination, mode, excludeShinkansen);
+    const itinerary = await search(origin, destination, mode);
     setReference(itinerary);
     return itinerary;
   }
@@ -180,7 +173,7 @@ function App() {
       return;
     }
 
-    const evaluation = evaluateRoute(network, legs);
+    const evaluation = evaluateRoute(network, legs, mode);
     setAnswerResult({ valid: true, evaluation });
     setTotalAnswered((n) => n + 1);
     setScreen('result');
@@ -229,7 +222,6 @@ function App() {
         network={network}
         origin={question.origin}
         destination={question.destination}
-        excludeShinkansen={excludeShinkansen}
         streak={streak}
         totalCorrect={totalCorrect}
         totalAnswered={totalAnswered}

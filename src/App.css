@@ -90,11 +90,19 @@
   color: var(--muted);
 }
 
-/* セクション見出し直下の補足注記（例: 新幹線は「日本全国」エリア限定ルール） */
+/* セクション直下の補足注記（例: 模範解答は無料の列車のみで計算） */
 .setup-note {
   font-size: 13px;
   color: var(--muted);
-  margin: 0 0 8px;
+  margin: 8px 0 0;
+}
+
+/* データ出典のクレジット表記 */
+.credit {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 16px 0 0;
+  text-align: center;
 }
 
 .primary-button {

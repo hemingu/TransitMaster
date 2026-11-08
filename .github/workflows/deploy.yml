@@ -35,7 +35,7 @@ jobs:
       - name: Run tests
         run: npm test
 
-      # network.json はリポジトリにコミットされている想定（駅データ.jp CSV + 国土数値情報N02
+      # network.json はリポジトリにコミットされている想定（Mini Tokyo 3D のデータ
       # から手元でビルドし、public/data/network.json としてコミットする運用）。
       # コミット漏れを検知するため、ここでは存在確認のみ行う。
       - name: Check network.json exists

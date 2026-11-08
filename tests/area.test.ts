@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { miniNetwork } from './fixtures/miniEkidata.ts';
+import { miniNetwork } from './fixtures/miniMt3d.ts';
 import { AREA_LABELS, pointInArea, stationsInArea } from '../src/lib/area.ts';
 
 describe('pointInArea', () => {
@@ -20,47 +20,31 @@ describe('pointInArea', () => {
     expect(pointInArea(139.622, 35.466, 'tokyo')).toBe(false);
   });
 
-  it('名古屋駅は nagoya 内', () => {
-    expect(pointInArea(136.882, 35.171, 'nagoya')).toBe(true);
-  });
-
-  it('大阪駅は osaka 内', () => {
-    expect(pointInArea(135.495, 34.702, 'osaka')).toBe(true);
-  });
-
-  it('京都駅は osaka 外', () => {
-    expect(pointInArea(135.759, 34.985, 'osaka')).toBe(false);
-  });
-
-  it('japan は常に true', () => {
-    expect(pointInArea(135.759, 34.985, 'japan')).toBe(true);
-    expect(pointInArea(0, 0, 'japan')).toBe(true);
+  it('mt3d（首都圏）は常に true', () => {
+    expect(pointInArea(135.759, 34.985, 'mt3d')).toBe(true);
+    expect(pointInArea(0, 0, 'mt3d')).toBe(true);
   });
 
   it('AREA_LABELS が全AreaIdに対して表示名を持つ', () => {
-    expect(AREA_LABELS.tokyo23).toBeTruthy();
-    expect(AREA_LABELS.tokyo).toBeTruthy();
-    expect(AREA_LABELS.nagoya).toBeTruthy();
-    expect(AREA_LABELS.osaka).toBeTruthy();
-    expect(AREA_LABELS.japan).toBeTruthy();
+    expect(AREA_LABELS.tokyo23).toBe('東京23区内');
+    expect(AREA_LABELS.tokyo).toBe('東京都内');
+    expect(AREA_LABELS.mt3d).toContain('Mini Tokyo 3D');
+    expect(Object.keys(AREA_LABELS)).toHaveLength(3);
   });
 });
 
 describe('stationsInArea', () => {
   const network = miniNetwork();
 
-  it('ミニネットワークの全駅が tokyo23 内（すべて都心の駅のため）', () => {
-    const inArea = stationsInArea(network, 'tokyo23');
-    expect(inArea.length).toBe(network.stations.length);
+  it('mt3d は全駅を返す', () => {
+    expect(stationsInArea(network, 'mt3d')).toHaveLength(network.stations.length);
   });
 
-  it('ミニネットワークの全駅が japan 内', () => {
-    const inArea = stationsInArea(network, 'japan');
-    expect(inArea.length).toBe(network.stations.length);
-  });
-
-  it('ミニネットワークの全駅が nagoya 内では0件', () => {
-    const inArea = stationsInArea(network, 'nagoya');
-    expect(inArea.length).toBe(0);
+  it('tokyo23 には横浜・小田原方面の駅（東横線の横浜等）は含まれない', () => {
+    const inArea = new Set(stationsInArea(network, 'tokyo23'));
+    const yokohama = network.stations.findIndex((s) => s.name === '横浜');
+    expect(inArea.has(yokohama)).toBe(false);
+    const tokyo = network.stations.findIndex((s) => s.name === '東京');
+    expect(inArea.has(tokyo)).toBe(true);
   });
 });

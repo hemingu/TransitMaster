@@ -57,8 +57,7 @@ export function useRoutingWorker(network: Network | null) {
   const search = (
     from: number,
     to: number,
-    mode: AnswerMode,
-    excludeShinkansen = false
+    mode: AnswerMode
   ): Promise<Itinerary | null> => {
     return new Promise((resolve) => {
       const worker = workerRef.current;
@@ -74,7 +73,6 @@ export function useRoutingWorker(network: Network | null) {
         from,
         to,
         mode,
-        excludeShinkansen,
       };
       worker.postMessage(msg);
     });

@@ -3,11 +3,11 @@ import { DIFFICULTY_LABELS, type Difficulty } from '../lib/game.ts';
 import type { AnswerMode, Network } from '../lib/types.ts';
 
 const ANSWER_MODE_LABELS: Record<AnswerMode, string> = {
-  time: '最短時間（推定）',
+  time: '最短時間',
   transfers: '最小乗換',
 };
 
-const AREA_ORDER: AreaId[] = ['tokyo23', 'tokyo', 'nagoya', 'osaka', 'japan'];
+const AREA_ORDER: AreaId[] = ['tokyo23', 'tokyo', 'mt3d'];
 const DIFFICULTY_ORDER: Difficulty[] = ['easy', 'normal', 'hard'];
 const ANSWER_MODE_ORDER: AnswerMode[] = ['time', 'transfers'];
 
@@ -44,7 +44,6 @@ export function SetupScreen({
 
       <section className="setup-group">
         <h2>エリア</h2>
-        <p className="setup-note">※新幹線は「日本全国」エリアでのみ使用できます</p>
         <div className="choice-grid">
           {AREA_ORDER.map((id) => {
             const count = areaStationCounts[id] ?? 0;
@@ -80,11 +79,10 @@ export function SetupScreen({
               <span>{ANSWER_MODE_LABELS[id]}</span>
             </button>
           ))}
-          <button type="button" className="choice-button" disabled aria-pressed={false}>
-            <span>最安運賃</span>
-            <span className="choice-note">データ未対応</span>
-          </button>
         </div>
+        <p className="setup-note">
+          模範解答は乗車券のみで乗れる列車（無料の列車）で計算しています。有料特急・座席指定ライナーは使用しません。
+        </p>
       </section>
 
       <section className="setup-group">
@@ -109,6 +107,8 @@ export function SetupScreen({
       <button type="button" className="primary-button start-button" onClick={onStart}>
         ゲームを始める
       </button>
+
+      <p className="credit">データ: Mini Tokyo 3D（公共交通オープンデータセンターのデータを加工）</p>
     </div>
   );
 }

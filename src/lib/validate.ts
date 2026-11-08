@@ -1,4 +1,7 @@
-import type { Network, RouteEvaluation, RouteLeg } from './types.ts';
+import { MinHeap } from './heap.ts';
+import { getNetworkIndex, nextNode } from './networkIndex.ts';
+import { LINK_SEGMENT } from './types.ts';
+import type { AnswerMode, Network, RouteEvaluation, RouteLeg } from './types.ts';
 
 export type InvalidReason =
   | 'empty'
@@ -22,53 +25,45 @@ function groupOf(network: Network, stationIdx: number): number {
 }
 
 /**
- * 指定した路線上で from から to へ、いずれかの Pattern の隣接停車駅（無向）を
- * たどって到達できるかを判定する。
+ * 駅レコード station と「同じ路線・同じ乗換グループ」の駅レコード一覧（station 自身を含む）。
+ * 大江戸線の都庁前のように、同じ路線が同じ駅に複数のレコードを持つことがあるため、
+ * プレイヤーが選んだ駅は「路線×駅グループ」の単位で同一視する（どのレコードを指していても同じ駅）。
+ */
+function sameLineRecords(network: Network, station: number): number[] {
+  const st = network.stations[station];
+  if (!st) return [];
+  const members = getNetworkIndex(network).groupMembers.get(st.group) ?? [station];
+  return members.filter((m) => network.stations[m].line === st.line);
+}
+
+/**
+ * 指定した路線上で from から to へ、その路線の区間だけをたどって到達できるかを判定する。
+ * 路線内でのパターンの乗換（同じ駅で別の系統に乗り換える。例: 大江戸線 新宿西口→練馬は都庁前で乗換）は許す。
+ * 区間は有向（進行方向どおり）。
  *
- * まず from/to が路線のいずれかの Pattern.stops に含まれているかを確認し、
- * 含まれていなければ 'station-not-on-line' を返す。
- * 両方含まれているが、隣接グラフ上で連結でなければ 'not-connected-on-line' を返す。
- * 連結なら undefined（問題なし）を返す。
+ * from/to が路線の駅レコードでなければ 'station-not-on-line'、
+ * 路線の区間をたどって到達できなければ 'not-connected-on-line'。到達できれば undefined。
+ * from/to は同じ路線・同じ駅グループの駅レコードをすべて同一視する（sameLineRecords）。
  */
 function checkLegOnLine(
   network: Network,
   lineIdx: number,
   from: number,
-  to: number,
+  to: number
 ): 'station-not-on-line' | 'not-connected-on-line' | undefined {
   const line = network.lines[lineIdx];
-  if (!line) return 'station-not-on-line';
+  const fromStation = network.stations[from];
+  const toStation = network.stations[to];
+  if (!line || !fromStation || !toStation) return 'station-not-on-line';
+  if (fromStation.line !== lineIdx || toStation.line !== lineIdx) return 'station-not-on-line';
 
-  let fromSeen = false;
-  let toSeen = false;
-  // 隣接リスト（無向）を全 Pattern から構築
-  const adjacency = new Map<number, Set<number>>();
-  const addEdge = (a: number, b: number) => {
-    if (!adjacency.has(a)) adjacency.set(a, new Set());
-    if (!adjacency.has(b)) adjacency.set(b, new Set());
-    adjacency.get(a)!.add(b);
-    adjacency.get(b)!.add(a);
-  };
-
-  for (const pattern of line.patterns) {
-    for (let i = 0; i < pattern.stops.length; i++) {
-      const stop = pattern.stops[i];
-      if (stop === from) fromSeen = true;
-      if (stop === to) toSeen = true;
-      if (i > 0) {
-        addEdge(pattern.stops[i - 1], pattern.stops[i]);
-      }
-    }
-  }
-
-  if (!fromSeen || !toSeen) return 'station-not-on-line';
-
-  // BFS で from -> to の連結性を判定
-  const visited = new Set<number>([from]);
-  const queue: number[] = [from];
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    if (cur === to) return undefined;
+  const adjacency = getNetworkIndex(network).lineAdjacency[lineIdx];
+  const targets = new Set(sameLineRecords(network, to));
+  const queue: number[] = sameLineRecords(network, from);
+  const visited = new Set<number>(queue);
+  for (let qi = 0; qi < queue.length; qi++) {
+    const cur = queue[qi];
+    if (targets.has(cur)) return undefined;
     for (const next of adjacency.get(cur) ?? []) {
       if (!visited.has(next)) {
         visited.add(next);
@@ -76,14 +71,14 @@ function checkLegOnLine(
       }
     }
   }
-  return visited.has(to) ? undefined : 'not-connected-on-line';
+  return 'not-connected-on-line';
 }
 
 export function validateRoute(
   network: Network,
   origin: number,
   destination: number,
-  legs: RouteLeg[],
+  legs: RouteLeg[]
 ): ValidationResult {
   if (legs.length === 0) {
     return { valid: false, reason: 'empty' };
@@ -124,101 +119,133 @@ export function validateRoute(
   return { valid: true };
 }
 
-/**
- * 指定路線の全 Pattern を合成した無向グラフ（ノード=駅index、辺重み=区間所要秒）上で、
- * from から to への最短所要秒を Dijkstra 法で求める。
- *
- * 分岐路線（Y字など）はパターンごとに部分的な停車列しか持たないため、単一パターンの
- * stops.indexOf だけでは分岐をまたぐ leg（例: 東山→西丘が別パターンの組み合わせでしか
- * 表現できない場合）を正しく評価できない。全パターンの隣接区間を1つの無向グラフに
- * 合成することで、validateRoute が許容する経路（隣接性さえ繋がっていれば良い）を
- * 漏れなく評価できるようにする。
- *
- * 到達不能なら null を返す。
- */
-function shortestRideSecOnLine(
-  network: Network,
-  lineIdx: number,
-  from: number,
-  to: number,
-): number | null {
-  if (from === to) return 0;
-  const line = network.lines[lineIdx];
-  if (!line) return null;
-
-  // 隣接リスト（無向、重み=segSec）を全 Pattern から構築
-  const adjacency = new Map<number, Map<number, number>>();
-  const addEdge = (a: number, b: number, w: number) => {
-    if (!adjacency.has(a)) adjacency.set(a, new Map());
-    if (!adjacency.has(b)) adjacency.set(b, new Map());
-    const mapA = adjacency.get(a)!;
-    const mapB = adjacency.get(b)!;
-    if (!mapA.has(b) || mapA.get(b)! > w) mapA.set(b, w);
-    if (!mapB.has(a) || mapB.get(a)! > w) mapB.set(a, w);
-  };
-
-  for (const pattern of line.patterns) {
-    for (let i = 0; i < pattern.segSec.length; i++) {
-      addEdge(pattern.stops[i], pattern.stops[i + 1], pattern.segSec[i]);
-    }
-  }
-
-  if (!adjacency.has(from) || !adjacency.has(to)) return null;
-
-  // Dijkstra法（駅数は小規模なので単純な優先度なし線形探索で十分）
-  const dist = new Map<number, number>([[from, 0]]);
-  const visited = new Set<number>();
-
-  for (;;) {
-    let cur: number | null = null;
-    let curDist = Number.POSITIVE_INFINITY;
-    for (const [node, d] of dist) {
-      if (!visited.has(node) && d < curDist) {
-        curDist = d;
-        cur = node;
-      }
-    }
-    if (cur === null) break;
-    if (cur === to) return curDist;
-    visited.add(cur);
-
-    for (const [next, weight] of adjacency.get(cur) ?? []) {
-      if (visited.has(next)) continue;
-      const candidate = curDist + weight;
-      if (!dist.has(next) || candidate < dist.get(next)!) {
-        dist.set(next, candidate);
-      }
-    }
-  }
-
-  return dist.has(to) ? (dist.get(to) as number) : null;
-}
+/** time モード: 1秒あたりのコスト単位（下位に乗換回数をタイブレークとして載せる）。 */
+const TIME_UNIT = 1000;
+/** transfers モード: 乗換1回あたりのコスト（秒の合計より十分大きい）。 */
+const TRANSFER_UNIT = 1e10;
 
 /**
  * 確定した legs（validateRouteで有効と判定された経路）を評価し、乗車時間・乗換回数・
  * 総所要秒（乗換ペナルティ込み）を返す。
  *
- * 各 leg は、その路線の全 Pattern を合成した無向グラフ上での from->to 最短所要秒として
- * 評価する（分岐路線でパターンをまたぐ leg も正しく評価できる）。
- * いずれかの leg が到達不能であれば totalSec は null（防御的。validateRoute を通った経路は
- * 通常ここで null にはならない）。
+ * プレイヤーの経路（路線＋乗降駅の列）を実現する乗り方のうち、モードの指標で最良のものを
+ * 状態 (何番目のleg, パターン, 停車位置) 上の Dijkstra 法で求める:
+ * - leg の乗車中は、その leg の路線の区間だけを進める
+ * - 同じパターンに乗り続けるなら乗換にならない。leg の境目でも、同じパターンのまま
+ *   （直通リンクをまたいでもよい）次の leg の乗車駅に着くなら乗換なし（直通運転）
+ * - パターンを変えるなら乗換ペナルティ transferSec・乗換+1（leg の途中で同じ路線内の別系統に
+ *   乗り換える場合も同様。例: 大江戸線 新宿西口→練馬は都庁前で乗換）
+ * 'time' は総所要秒最小（同値なら乗換が少ない方）、'transfers' は乗換回数最小（同数なら総所要秒最小）。
+ * 模範解答（searchRoute）と同じグラフ・同じコストで評価するため、模範解答の経路をそのまま
+ * 評価すると模範解答と完全に同じ総所要秒・乗換回数になる。
+ *
+ * いずれかの leg が到達不能であれば totalSec は null。
  */
-export function evaluateRoute(network: Network, legs: RouteLeg[]): RouteEvaluation {
-  const transfers = legs.length - 1;
+export function evaluateRoute(
+  network: Network,
+  legs: RouteLeg[],
+  mode: AnswerMode = 'time'
+): RouteEvaluation {
+  const broken: RouteEvaluation = { transfers: Math.max(0, legs.length - 1), rideSec: 0, totalSec: null };
+  if (legs.length === 0) return broken;
 
-  let rideSec = 0;
-  let broken = false;
+  const index = getNetworkIndex(network);
+  const B = index.nodeCount;
+  const rideUnit = mode === 'time' ? TIME_UNIT : 1;
+  const boardCost =
+    mode === 'time' ? network.transferSec * TIME_UNIT + 1 : TRANSFER_UNIT + network.transferSec;
 
-  for (const leg of legs) {
-    const sec = shortestRideSecOnLine(network, leg.line, leg.from, leg.to);
-    if (sec === null) {
-      broken = true;
-      break;
+  /** 駅レコード（同じ路線・同じグループのレコードを同一視）の乗車ノード一覧。 */
+  const nodesOfClass = (station: number): number[] => {
+    const out: number[] = [];
+    for (const rec of sameLineRecords(network, station)) {
+      for (let k = index.stationNodeStart[rec]; k < index.stationNodeStart[rec + 1]; k++) {
+        out.push(index.stationNodeList[k]);
+      }
     }
-    rideSec += sec;
+    return out;
+  };
+  const toSets = legs.map((l) => new Set(sameLineRecords(network, l.to)));
+  const fromSets = legs.map((l) => new Set(sameLineRecords(network, l.from)));
+  /** ノードから出る区間の路線（終端なら undefined）。 */
+  const outSegLine = (node: number): number | undefined => {
+    const p = index.nodePattern[node];
+    return network.patterns[p].segLine[index.nodePos[node]];
+  };
+
+  const dist = new Map<number, number>();
+  const heap = new MinHeap();
+  const relax = (k: number, node: number, cost: number) => {
+    const key = k * B + node;
+    const old = dist.get(key);
+    if (old === undefined || cost < old) {
+      dist.set(key, cost);
+      heap.push(cost, key);
+    }
+  };
+
+  for (const nd of nodesOfClass(legs[0].from)) relax(0, nd, 0);
+
+  const last = legs.length - 1;
+  let best: number | null = null;
+
+  for (;;) {
+    const top = heap.pop();
+    if (top === undefined) break;
+    const { key: cost, val: key } = top;
+    if (cost > (dist.get(key) ?? Number.POSITIVE_INFINITY)) continue;
+    const k = Math.floor(key / B);
+    const node = key - k * B;
+    const leg = legs[k];
+
+    // ---- leg の降車駅に着いた ----
+    if (toSets[k].has(index.nodeStation[node])) {
+      if (k === last) {
+        best = cost;
+        break;
+      }
+      const nextFrom = fromSets[k + 1];
+      // (a) 同じパターンのまま（直通リンクをまたいでもよい）次の leg の乗車駅へ: 乗換なし
+      let x = node;
+      let acc = 0;
+      for (let guard = 0; x !== -1 && guard < 1000; guard++) {
+        if (nextFrom.has(index.nodeStation[x])) relax(k + 1, x, cost + acc * rideUnit);
+        const seg = outSegLine(x);
+        if (seg !== LINK_SEGMENT) break;
+        acc += network.patterns[index.nodePattern[x]].segSec[index.nodePos[x]];
+        x = nextNode(index, x);
+      }
+      // (b) 降りて別のパターンに乗る: 乗換
+      for (const nd of nodesOfClass(legs[k + 1].from)) relax(k + 1, nd, cost + boardCost);
+    }
+
+    // ---- leg の路線の区間に沿って進む ----
+    if (outSegLine(node) === leg.line) {
+      const nx = nextNode(index, node);
+      if (nx !== -1) {
+        const sec = network.patterns[index.nodePattern[node]].segSec[index.nodePos[node]];
+        relax(k, nx, cost + sec * rideUnit);
+      }
+    }
+
+    // ---- 同じ駅で同じ路線の別のパターンに乗り換える（leg の途中での路線内乗換） ----
+    for (const nd of nodesOfClass(index.nodeStation[node])) {
+      if (nd !== node && index.nodePattern[nd] !== index.nodePattern[node] && outSegLine(nd) === leg.line) {
+        relax(k, nd, cost + boardCost);
+      }
+    }
   }
 
-  const totalSec = broken ? null : rideSec + transfers * network.transferSec;
+  if (best === null) return broken;
 
-  return { transfers, rideSec, totalSec };
+  let transfers: number;
+  let totalSec: number;
+  if (mode === 'time') {
+    totalSec = Math.floor(best / TIME_UNIT);
+    transfers = best % TIME_UNIT;
+  } else {
+    transfers = Math.floor(best / TRANSFER_UNIT);
+    totalSec = best - transfers * TRANSFER_UNIT;
+  }
+  return { transfers, rideSec: totalSec - transfers * network.transferSec, totalSec };
 }

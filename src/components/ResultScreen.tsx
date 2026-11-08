@@ -24,7 +24,7 @@ interface ResultScreenProps {
 }
 
 const MODE_LABELS: Record<AnswerMode, string> = {
-  time: '最短時間（推定）',
+  time: '最短時間',
   transfers: '最小乗換',
 };
 

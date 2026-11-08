@@ -26,6 +26,9 @@ dist-ssr
 # 旧GTFSパイプラインのデータ（廃止済みだが手元のzip実データは残す運用のため丸ごと除外）
 /data/gtfs/
 
-# 駅データ.jp CSV・国土数値情報N02データ（ユーザーが手元に配置するローカルデータ）
+# Mini Tokyo 3D のデータ（npm run fetch:mt3d で取得するローカルデータ、約105MB）
+/data/mt3d/
+
+# 旧データ源（駅データ.jp CSV・国土数値情報N02。廃止済みで、手元に残っていても無視する）
 /data/ekidata/
 /data/n02/

@@ -1,7 +1,7 @@
 import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from './types.ts';
 import { getNetworkIndex } from './networkIndex.ts';
-import { kataToHira, type AutocompleteOption } from './autocomplete.ts';
-import { prefName } from './prefNames.ts';
+import type { AutocompleteOption } from './autocomplete.ts';
+import { normalizeRomaji } from './romaji.ts';
 
 /** difficulty -> generateQuestion の乗換回数レンジ */
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -38,12 +38,11 @@ export function formatDuration(sec: number): string {
 }
 
 /**
- * 駅間所要秒(segSec)ベースの推定所要時間を "約X分（推定）" もしくは
- * "約X時間Y分（推定）" 形式に整形する。時刻表を廃止したため、実際の発着時刻ではなく
- * あくまで区間所要秒の合計に基づく目安であることを明示する。
+ * 所要秒を "約X分" もしくは "約X時間Y分" 形式に整形する。
+ * 時刻表の最速の運用の所要時間の合計＋乗換ペナルティ（固定）に基づく目安であるため「約」を付ける。
  */
 export function formatEstimatedDuration(sec: number): string {
-  return `約${formatDuration(sec)}（推定）`;
+  return `約${formatDuration(sec)}`;
 }
 
 /** 駅のグループ代表名（グループ内先頭に見つかった駅の name）を返す */
@@ -67,96 +66,64 @@ export function formatLineName(network: Network, lineIdx: number): string {
 }
 
 /**
- * オートコンプリート候補構築のオプション。
- * excludeShinkansen: ゲームルール上、新幹線（lineType===1）は「日本全国」エリアでのみ
- * 使用できるため、それ以外のエリアでは候補からも除外する。
- */
-export interface CandidateOptions {
-  excludeShinkansen?: boolean;
-}
-
-/**
  * 路線オートコンプリートの候補一覧（全路線）を構築する。
- * label は「路線名（事業者名）」、searchText はふりがな（カナ）があればカタカナ・ひらがな両方を連結して
- * カナ入力でもヒットするようにする。badge は LineBadge 表示用。
- * opts.excludeShinkansen が true なら新幹線（lineType===1）を候補に含めない。
+ * label は「路線名（事業者名）」。searchText は日本語名、romaji は英語表記の正規化キー
+ * （かな・ローマ字入力でもヒットする）。badge は LineBadge 表示用。
  */
-export function buildLineOptions(
-  network: Network,
-  opts: CandidateOptions = {}
-): AutocompleteOption[] {
-  const options: AutocompleteOption[] = [];
-  network.lines.forEach((line, lineIdx) => {
-    if (opts.excludeShinkansen && line.lineType === 1) return;
+export function buildLineOptions(network: Network): AutocompleteOption[] {
+  return network.lines.map((line, lineIdx) => {
     const label = formatLineName(network, lineIdx);
-    const searchText = line.kana ? `${label} ${line.kana} ${kataToHira(line.kana)}` : label;
-    options.push({
+    return {
       id: lineIdx,
       label,
-      searchText,
+      searchText: label,
+      romaji: normalizeRomaji(line.en),
       badge: { name: line.name, company: line.company, color: line.color },
-    });
+    };
   });
-  return options;
 }
 
 /**
- * 「新幹線（lineType===1）の路線にしか属さない」駅グループの集合を返す
- * （岐阜羽島・安中榛名などの新幹線単独駅。excludeShinkansen 時は候補から除外する）。
+ * 降車駅オートコンプリートの候補一覧を構築する（グループ＝物理駅 × 駅名 の単位で重複排除）。
+ * - id はその（グループ, 駅名）の代表駅（stations 配列で最初に出現する駅index）
+ *   （同じグループ内でも駅名が異なる場合は別候補。例: 新宿 / 新宿西口 / 都庁前 が同一グループのとき）
+ * - searchText は日本語駅名、romaji は英語表記の正規化キー
+ * - 同じ駅名が複数のグループに存在する場合（例: 別の場所にある同名の浅草）に限り、
+ *   note に乗り入れ路線（最初の1路線＋「ほか」）を添えて区別できるようにする
  */
-function shinkansenOnlyGroups(network: Network): Set<number> {
-  const { lineGroups } = getNetworkIndex(network);
-  const shinkansenGroups = new Set<number>();
-  const otherGroups = new Set<number>();
-  lineGroups.forEach((groups, lineIdx) => {
-    const target = network.lines[lineIdx].lineType === 1 ? shinkansenGroups : otherGroups;
-    for (const g of groups) target.add(g);
-  });
-  const result = new Set<number>();
-  for (const g of shinkansenGroups) {
-    if (!otherGroups.has(g)) result.add(g);
-  }
-  return result;
-}
-
-/**
- * 降車駅オートコンプリートの候補一覧（全駅をグループ＝物理駅単位で重複排除）を構築する。
- * - id はグループ代表（stations 配列で最初に出現する駅index）
- * - searchText はふりがな（カナ）があればカタカナ・ひらがな両方を連結
- * - 同じ駅名が複数グループに存在する場合（例: 大阪と東京の京橋）に限り、
- *   note に都道府県名を添えて区別できるようにする（pref=0 等で判定不能なら表示しない）
- * - opts.excludeShinkansen が true なら新幹線路線にしか属さない駅（新幹線単独駅）を候補に含めない
- */
-export function buildStationOptions(
-  network: Network,
-  opts: CandidateOptions = {}
-): AutocompleteOption[] {
-  const excludedGroups = opts.excludeShinkansen ? shinkansenOnlyGroups(network) : null;
-
-  const seenGroups = new Set<number>();
-  const representatives: { stationIdx: number; name: string; kana?: string; pref: number }[] = [];
-  const groupCountByName = new Map<string, number>();
+export function buildStationOptions(network: Network): AutocompleteOption[] {
+  const seen = new Set<string>();
+  const reps: { stationIdx: number; name: string; en: string; group: number }[] = [];
+  const groupCountByName = new Map<string, Set<number>>();
+  const groupLines = new Map<number, number[]>();
 
   network.stations.forEach((station, stationIdx) => {
-    if (seenGroups.has(station.group)) return;
-    seenGroups.add(station.group);
-    if (excludedGroups?.has(station.group)) return;
-    representatives.push({
-      stationIdx,
-      name: station.name,
-      kana: station.kana,
-      pref: station.pref,
-    });
-    groupCountByName.set(station.name, (groupCountByName.get(station.name) ?? 0) + 1);
+    const lines = groupLines.get(station.group);
+    if (lines) {
+      if (!lines.includes(station.line)) lines.push(station.line);
+    } else {
+      groupLines.set(station.group, [station.line]);
+    }
+    const key = `${station.group}\u0000${station.name}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    reps.push({ stationIdx, name: station.name, en: station.en, group: station.group });
+    const groups = groupCountByName.get(station.name);
+    if (groups) groups.add(station.group);
+    else groupCountByName.set(station.name, new Set([station.group]));
   });
 
-  return representatives.map((rep) => {
-    const searchText = rep.kana ? `${rep.name} ${rep.kana} ${kataToHira(rep.kana)}` : rep.name;
-    const option: AutocompleteOption = { id: rep.stationIdx, label: rep.name, searchText };
-    if ((groupCountByName.get(rep.name) ?? 0) >= 2) {
-      const pref = prefName(rep.pref);
-      if (pref !== null) {
-        option.note = pref;
+  return reps.map((rep) => {
+    const option: AutocompleteOption = {
+      id: rep.stationIdx,
+      label: rep.name,
+      searchText: rep.name,
+      romaji: normalizeRomaji(rep.en),
+    };
+    if ((groupCountByName.get(rep.name)?.size ?? 0) >= 2) {
+      const lines = groupLines.get(rep.group) ?? [];
+      if (lines.length > 0) {
+        option.note = formatLineName(network, lines[0]) + (lines.length > 1 ? 'ほか' : '');
       }
     }
     return option;
@@ -167,13 +134,12 @@ export function buildStationOptions(
 export function linesThroughStation(network: Network, stationIdx: number): number[] {
   const group = network.stations[stationIdx]?.group;
   if (group === undefined) return [];
-  const index = getNetworkIndex(network);
+  const members = getNetworkIndex(network).groupMembers.get(group) ?? [];
   const result: number[] = [];
-  index.lineGroups.forEach((groups, lineIdx) => {
-    if (groups.has(group)) {
-      result.push(lineIdx);
-    }
-  });
+  for (const m of members) {
+    const line = network.stations[m].line;
+    if (!result.includes(line)) result.push(line);
+  }
   return result;
 }
 
@@ -192,23 +158,18 @@ export function stationsOnLine(
 
   const seenGroups = new Set<number>();
   const result: { stationIdx: number; name: string; group: number }[] = [];
-
-  for (const pattern of line.patterns) {
-    for (const stopIdx of pattern.stops) {
-      const group = network.stations[stopIdx].group;
-      if (excludeGroup !== undefined && group === excludeGroup) continue;
-      if (seenGroups.has(group)) continue;
-      seenGroups.add(group);
-      result.push({ stationIdx: stopIdx, name: network.stations[stopIdx].name, group });
-    }
+  for (const stationIdx of getNetworkIndex(network).lineStations[lineIdx]) {
+    const station = network.stations[stationIdx];
+    if (excludeGroup !== undefined && station.group === excludeGroup) continue;
+    if (seenGroups.has(station.group)) continue;
+    seenGroups.add(station.group);
+    result.push({ stationIdx, name: station.name, group: station.group });
   }
-
   return result;
 }
 
 /**
- * 指定駅と同一グループの駅のうち、指定路線の Pattern.stops に実際に含まれる
- * 駅 index を返す。見つからなければ null。
+ * 指定駅と同一グループの駅のうち、指定路線の駅レコードである駅 index を返す。見つからなければ null。
  *
  * Station は路線ごとに別レコードのため（例: 東京(山手線) と 東京(丸ノ内線) は
  * 同一グループだが別 index）、直前の路線で降りた駅 index をそのまま次の路線の
@@ -224,17 +185,9 @@ export function stationOnLineInGroup(
   const station = network.stations[stationIdx];
   if (!line || !station) return null;
 
-  const group = station.group;
-  const index = getNetworkIndex(network);
-  const members = index.groupMembers.get(group) ?? [stationIdx];
-  const memberSet = new Set(members);
-
-  for (const pattern of line.patterns) {
-    for (const stopIdx of pattern.stops) {
-      if (memberSet.has(stopIdx)) {
-        return stopIdx;
-      }
-    }
+  const members = getNetworkIndex(network).groupMembers.get(station.group) ?? [stationIdx];
+  for (const m of members) {
+    if (network.stations[m].line === lineIdx) return m;
   }
   return null;
 }
@@ -382,17 +335,22 @@ export function judgeAnswer(
   };
 }
 
-/** 組み立て中の経路を表示用文字列に変換する（例: "山手線（JR東日本） 東京→上野 ｜ 丸ノ内線（東京メトロ） 上野→新宿"） */
-export function formatRouteLegs(network: Network, legs: RouteLeg[]): string {
+/**
+ * 経路を表示用文字列に変換する
+ * （例: "山手線（JR東日本） 東京→上野 ｜ 丸ノ内線（東京メトロ） 上野→新宿"）。
+ * 直通運転（through 付きの区間）は「｜」ではなく「直通」でつなぐ。
+ */
+export function formatRouteLegs(network: Network, legs: (RouteLeg & { through?: boolean })[]): string {
   if (legs.length === 0) return '（まだ経路がありません）';
-  return legs
-    .map((leg) => {
-      const lineName = formatLineName(network, leg.line);
-      const fromName = stationDisplayName(network, leg.from);
-      const toName = stationDisplayName(network, leg.to);
-      return `${lineName} ${fromName}→${toName}`;
-    })
-    .join(' ｜ ');
+  let out = '';
+  legs.forEach((leg, i) => {
+    const lineName = formatLineName(network, leg.line);
+    const fromName = stationDisplayName(network, leg.from);
+    const toName = stationDisplayName(network, leg.to);
+    if (i > 0) out += leg.through ? ' ＝直通＝ ' : ' ｜ ';
+    out += `${lineName} ${fromName}→${toName}`;
+  });
+  return out;
 }
 
 /** Itinerary（模範解答）を表示用文字列に変換する */

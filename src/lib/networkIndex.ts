@@ -1,122 +1,137 @@
+import { LINK_SEGMENT } from './types.ts';
 import type { Network } from './types.ts';
-
-/** 駅がどの (路線, パターン, パターン内位置) に停車するかを表す逆引きエントリ。 */
-export interface StationPatternRef {
-  /** 路線index。 */
-  line: number;
-  /** パターンindex。 */
-  pattern: number;
-  /** パターン内での停車位置（stops配列のindex）。 */
-  pos: number;
-}
 
 /**
  * Network から導出される高速検索用インデックス。Network 自体は不変データなので
  * WeakMap でメモ化し、同一参照に対する再計算を避ける。
+ *
+ * 「ノード」= (パターン, 停車位置) の組。全パターンの全停車位置に連番（node id）を振る。
+ * 環状パターンは末尾の再掲位置を持たない（実長 m = stops.length - 1 個のノード）。
  */
 export interface NetworkIndex {
   /** グループID -> そのグループに属する駅index一覧。 */
   groupMembers: Map<number, number[]>;
-  /** 駅index -> その駅が登場する (路線, パターン, 位置) の一覧（逆引き）。 */
-  stationPatterns: StationPatternRef[][];
-  /**
-   * cumSec[line][pattern][i] = そのパターンの stops[0] から stops[i] までの累積所要秒。
-   * cumSec[line][pattern][0] === 0、配列長は stops.length（= segSec.length + 1）。
-   */
-  cumSec: number[][][];
-  /** 路線index -> その路線が停車する駅グループの集合。 */
+  /** patOffset[p] = パターン p の先頭ノードid。長さ patterns.length + 1。 */
+  patOffset: Int32Array;
+  /** 総ノード数。 */
+  nodeCount: number;
+  /** ノードid -> パターンindex。 */
+  nodePattern: Int32Array;
+  /** ノードid -> パターン内の停車位置。 */
+  nodePos: Int32Array;
+  /** ノードid -> 駅index。 */
+  nodeStation: Int32Array;
+  /** パターンが環状か（stops[0] === stops[last] かつ stops.length >= 4）。 */
+  isRing: boolean[];
+  /** stationNodeStart[s]..stationNodeStart[s+1] が、駅 s が登場するノードidの範囲（stationNodeList 内）。 */
+  stationNodeStart: Int32Array;
+  stationNodeList: Int32Array;
+  /** 路線index -> その路線の駅レコードが属する乗換グループの集合。 */
   lineGroups: Set<number>[];
+  /** 路線index -> その路線の駅レコード（station index）一覧。 */
+  lineStations: number[][];
   /**
-   * isRing[line][pattern] = そのパターンが環状か（stops[0] === stops[stops.length-1] かつ stops.length >= 4）。
-   * stops.length >= 4 という条件は「始点 - 中間駅1つ以上 - 始点」を要求し、
-   * 折り返しのみの2駅パターン（stops.length===2かつ同一駅、通常は発生しないが念のため）を誤検出しないための下限。
+   * 路線index -> 駅レコード -> その路線の区間（segLine === 路線）で直接つながる次駅レコードの一覧（有向）。
+   * 路線内でのパターン乗換を許した到達可能性判定（validateRoute）に使う。
    */
-  isRing: boolean[][];
+  lineAdjacency: Map<number, number[]>[];
 }
 
 const cache = new WeakMap<Network, NetworkIndex>();
 
-/**
- * Network から NetworkIndex を構築（または WeakMap キャッシュから取得）する。
- *
- * 環状パターンの扱い: stops の末尾に始点駅が再掲されている場合、stationPatterns への逆引き登録は
- * 先頭位置（pos=0）のみを行い、末尾位置（pos=stops.length-1）は登録しない。
- * これにより、環状パターンの始点駅が同一パターンに対して二重登録されることを防ぐ。
- */
+/** 次のノードid（同一パターン内。非環状の終端なら -1）。 */
+export function nextNode(index: NetworkIndex, node: number): number {
+  const p = index.nodePattern[node];
+  const start = index.patOffset[p];
+  const end = index.patOffset[p + 1];
+  if (node + 1 < end) return node + 1;
+  return index.isRing[p] ? start : -1;
+}
+
 export function getNetworkIndex(network: Network): NetworkIndex {
   const cached = cache.get(network);
-  if (cached) {
-    return cached;
-  }
+  if (cached) return cached;
 
   const n = network.stations.length;
+  const P = network.patterns.length;
 
   // ---- groupMembers ----
   const groupMembers = new Map<number, number[]>();
   for (let i = 0; i < n; i++) {
     const g = network.stations[i].group;
     const arr = groupMembers.get(g);
-    if (arr) {
-      arr.push(i);
-    } else {
-      groupMembers.set(g, [i]);
-    }
+    if (arr) arr.push(i);
+    else groupMembers.set(g, [i]);
   }
 
-  // ---- stationPatterns, cumSec, lineGroups, isRing ----
-  const stationPatterns: StationPatternRef[][] = Array.from({ length: n }, () => []);
-  const cumSec: number[][][] = [];
-  const lineGroups: Set<number>[] = [];
-  const isRing: boolean[][] = [];
-
-  for (let lineIdx = 0; lineIdx < network.lines.length; lineIdx++) {
-    const line = network.lines[lineIdx];
-    const lineCumSec: number[][] = [];
-    const lineIsRing: boolean[] = [];
-    const groupsForLine = new Set<number>();
-
-    for (let patternIdx = 0; patternIdx < line.patterns.length; patternIdx++) {
-      const pattern = line.patterns[patternIdx];
-      const { stops, segSec } = pattern;
-
-      // 累積秒の計算
-      const cum: number[] = new Array(stops.length);
-      cum[0] = 0;
-      for (let i = 0; i < segSec.length; i++) {
-        cum[i + 1] = cum[i] + segSec[i];
-      }
-      lineCumSec.push(cum);
-
-      // 環状判定
-      const ring =
-        stops.length >= 4 && stops[0] === stops[stops.length - 1];
-      lineIsRing.push(ring);
-
-      // 逆引き登録（環状パターンは末尾の再掲位置を登録しない）
-      const lastPos = stops.length - 1;
-      for (let pos = 0; pos < stops.length; pos++) {
-        if (ring && pos === lastPos) {
-          continue;
-        }
-        const stationIdx = stops[pos];
-        stationPatterns[stationIdx].push({ line: lineIdx, pattern: patternIdx, pos });
-        groupsForLine.add(network.stations[stationIdx].group);
-      }
+  // ---- ノード採番 ----
+  const isRing: boolean[] = new Array(P);
+  const patOffset = new Int32Array(P + 1);
+  for (let p = 0; p < P; p++) {
+    const { stops } = network.patterns[p];
+    const ring = stops.length >= 4 && stops[0] === stops[stops.length - 1];
+    isRing[p] = ring;
+    patOffset[p + 1] = patOffset[p] + (ring ? stops.length - 1 : stops.length);
+  }
+  const nodeCount = patOffset[P];
+  const nodePattern = new Int32Array(nodeCount);
+  const nodePos = new Int32Array(nodeCount);
+  const nodeStation = new Int32Array(nodeCount);
+  const counts = new Int32Array(n + 1);
+  for (let p = 0; p < P; p++) {
+    const { stops } = network.patterns[p];
+    const len = patOffset[p + 1] - patOffset[p];
+    for (let pos = 0; pos < len; pos++) {
+      const id = patOffset[p] + pos;
+      nodePattern[id] = p;
+      nodePos[id] = pos;
+      nodeStation[id] = stops[pos];
+      counts[stops[pos] + 1]++;
     }
+  }
+  const stationNodeStart = new Int32Array(n + 1);
+  for (let s = 0; s < n; s++) stationNodeStart[s + 1] = stationNodeStart[s] + counts[s + 1];
+  const fill = stationNodeStart.slice(0, n);
+  const stationNodeList = new Int32Array(nodeCount);
+  for (let id = 0; id < nodeCount; id++) stationNodeList[fill[nodeStation[id]]++] = id;
 
-    cumSec.push(lineCumSec);
-    isRing.push(lineIsRing);
-    lineGroups.push(groupsForLine);
+  // ---- 路線ごとの索引 ----
+  const L = network.lines.length;
+  const lineGroups: Set<number>[] = Array.from({ length: L }, () => new Set<number>());
+  const lineStations: number[][] = Array.from({ length: L }, () => []);
+  for (let s = 0; s < n; s++) {
+    const st = network.stations[s];
+    lineStations[st.line].push(s);
+    lineGroups[st.line].add(st.group);
+  }
+  const lineAdjacency: Map<number, number[]>[] = Array.from({ length: L }, () => new Map());
+  for (const pattern of network.patterns) {
+    for (let i = 0; i < pattern.segLine.length; i++) {
+      const line = pattern.segLine[i];
+      if (line === LINK_SEGMENT) continue;
+      const adj = lineAdjacency[line];
+      const from = pattern.stops[i];
+      const to = pattern.stops[i + 1];
+      const list = adj.get(from);
+      if (!list) adj.set(from, [to]);
+      else if (!list.includes(to)) list.push(to);
+    }
   }
 
   const index: NetworkIndex = {
     groupMembers,
-    stationPatterns,
-    cumSec,
-    lineGroups,
+    patOffset,
+    nodeCount,
+    nodePattern,
+    nodePos,
+    nodeStation,
     isRing,
+    stationNodeStart,
+    stationNodeList,
+    lineGroups,
+    lineStations,
+    lineAdjacency,
   };
-
   cache.set(network, index);
   return index;
 }

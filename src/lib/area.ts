@@ -1,14 +1,13 @@
 import areasData from '../data/areas.json' with { type: 'json' };
 import type { Network } from './types.ts';
 
-export type AreaId = 'tokyo23' | 'tokyo' | 'nagoya' | 'osaka' | 'japan';
+/** mt3d = 首都圏（Mini Tokyo 3D収録範囲）= ネットワーク内の全駅。 */
+export type AreaId = 'tokyo23' | 'tokyo' | 'mt3d';
 
 export const AREA_LABELS: Record<AreaId, string> = {
   tokyo23: '東京23区内',
   tokyo: '東京都内',
-  nagoya: '名古屋市内',
-  osaka: '大阪市内',
-  japan: '日本全国',
+  mt3d: '首都圏（Mini Tokyo 3D収録範囲）',
 };
 
 type Ring = [number, number][];
@@ -19,7 +18,7 @@ type MultiPolygon = Ring[][];
 type AreasFile = {
   source: string;
   generatedAt: string;
-  areas: Partial<Record<Exclude<AreaId, 'japan'>, MultiPolygon>>;
+  areas: Partial<Record<Exclude<AreaId, 'mt3d'>, MultiPolygon>>;
 };
 
 const areasFile = areasData as unknown as AreasFile;
@@ -59,10 +58,10 @@ function pointInMultiPolygon(lon: number, lat: number, mp: MultiPolygon): boolea
 
 /**
  * 指定座標が指定エリア内かどうかを ray casting で判定する。
- * 'japan' は常に true（全駅対象）。
+ * 'mt3d' は常に true（全駅対象）。
  */
 export function pointInArea(lon: number, lat: number, area: AreaId): boolean {
-  if (area === 'japan') return true;
+  if (area === 'mt3d') return true;
   const mp = areasFile.areas[area];
   if (!mp) return false;
   return pointInMultiPolygon(lon, lat, mp);

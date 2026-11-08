@@ -11,91 +11,63 @@ export interface QuestionOptions {
   minTransfers?: number;
   maxTransfers?: number;
   rng?: () => number;
-  /**
-   * true のとき新幹線（lineType===1）を到達性判定から除外する。
-   * ゲームルール上、新幹線は「日本全国」エリアでのみ使用できるため、それ以外のエリアでは
-   * 「新幹線でしか到達できない駅ペア」を出題しないようにする。
-   */
-  excludeShinkansen?: boolean;
 }
 
 const MAX_ATTEMPTS = 200;
 
 /**
- * 路線グラフ上で、出発駅グループから到着駅グループまでの最小乗換回数を求める。
- * ノード=路線。2路線が同一乗換グループの駅を共有すれば辺で接続。
- * 出発駅グループが乗れる路線集合から到着駅グループへ到達するまでの最小路線数-1が乗換回数。
- * 到達不可能な場合は null。
- * excludeShinkansen が true のとき、新幹線（lineType===1）の路線をBFSから除外する。
+ * 出発駅グループから到着駅グループまでの最小乗換回数を、パターン（有向）単位のラウンド探索で求める。
+ * ラウンドk = 乗車k回目。出発グループの駅から乗れるパターン（乗車位置以降の停車駅が到達範囲）を
+ * 乗り、到達したグループから次のラウンドで別のパターンに乗る。到着グループに着いたラウンド - 1 が乗換回数。
+ * 直通運転（同一パターンで路線をまたぐ）は乗換に数えないため、searchRoute の 'transfers' モードの
+ * 乗換回数と一致する。到達不可能な場合は null。
  */
 function minTransfersBetweenGroups(
   network: Network,
   originGroup: number,
-  destGroup: number,
-  excludeShinkansen = false
+  destGroup: number
 ): number | null {
   if (originGroup === destGroup) return 0;
 
-  // 各路線が停車する乗換グループの集合（NetworkIndexでキャッシュ済みのものを利用し、
-  // 出題リトライのたびに全路線を線形走査する再計算を避ける）
-  const lineGroups = getNetworkIndex(network).lineGroups;
+  const index = getNetworkIndex(network);
+  const P = network.patterns.length;
+  // パターンごとに「これまでに乗車した最小の位置」を覚え、より手前から乗れる場合だけ再走査する
+  const boardedFrom = new Int32Array(P).fill(0x7fffffff);
+  const reached = new Set<number>([originGroup]);
+  let frontier: number[] = [originGroup];
 
-  const isExcluded = (lineIdx: number) =>
-    excludeShinkansen && network.lines[lineIdx].lineType === 1;
-
-  const originLines: number[] = [];
-  const destLines: number[] = [];
-  lineGroups.forEach((groups, lineIdx) => {
-    if (isExcluded(lineIdx)) return;
-    if (groups.has(originGroup)) originLines.push(lineIdx);
-    if (groups.has(destGroup)) destLines.push(lineIdx);
-  });
-
-  if (originLines.length === 0 || destLines.length === 0) return null;
-
-  const destLineSet = new Set(destLines);
-
-  // 出発駅グループに乗り入れる路線から即座に到着可能か（乗換0）
-  for (const lineIdx of originLines) {
-    if (destLineSet.has(lineIdx)) return 0;
-  }
-
-  // 路線ノードのBFS。distance[line] = その路線に乗るまでに要した乗換回数
-  const visited = new Set<number>(originLines);
-  let frontier = originLines;
-  let transfers = 0;
-
-  while (frontier.length > 0) {
-    transfers++;
-    const nextFrontier: number[] = [];
-    // frontier の各路線が経由する全乗換グループに接続する路線を集める
-    const reachableGroups = new Set<number>();
-    for (const lineIdx of frontier) {
-      for (const g of lineGroups[lineIdx]) {
-        reachableGroups.add(g);
-      }
-    }
-    for (let lineIdx = 0; lineIdx < network.lines.length; lineIdx++) {
-      if (visited.has(lineIdx)) continue;
-      if (isExcluded(lineIdx)) continue;
-      const groups = lineGroups[lineIdx];
-      let connects = false;
-      for (const g of reachableGroups) {
-        if (groups.has(g)) {
-          connects = true;
-          break;
+  for (let round = 1; frontier.length > 0; round++) {
+    const toScan = new Map<number, number>(); // pattern -> 最小の乗車位置
+    for (const g of frontier) {
+      for (const s of index.groupMembers.get(g) ?? []) {
+        for (let k = index.stationNodeStart[s]; k < index.stationNodeStart[s + 1]; k++) {
+          const node = index.stationNodeList[k];
+          const p = index.nodePattern[node];
+          const pos = index.nodePos[node];
+          if (pos < boardedFrom[p] && pos < (toScan.get(p) ?? Number.POSITIVE_INFINITY)) {
+            toScan.set(p, pos);
+          }
         }
       }
-      if (!connects) continue;
-      visited.add(lineIdx);
-      if (groups.has(destGroup)) {
-        return transfers;
-      }
-      nextFrontier.push(lineIdx);
     }
-    frontier = nextFrontier;
+    const next: number[] = [];
+    for (const [p, pos] of toScan) {
+      boardedFrom[p] = pos;
+      const start = index.patOffset[p];
+      const end = index.patOffset[p + 1];
+      // 環状パターンは全停車駅に到達でき、それ以外は乗車位置より後ろの停車駅に到達できる
+      const from = index.isRing[p] ? start : start + pos;
+      for (let node = from; node < end; node++) {
+        const g = network.stations[index.nodeStation[node]].group;
+        if (!reached.has(g)) {
+          reached.add(g);
+          next.push(g);
+        }
+      }
+    }
+    if (reached.has(destGroup)) return round - 1;
+    frontier = next;
   }
-
   return null;
 }
 
@@ -112,8 +84,9 @@ export function generateQuestion(
   const minTransfers = opts.minTransfers ?? 1;
   const maxTransfers = opts.maxTransfers;
   const rng = opts.rng ?? Math.random;
-  const excludeShinkansen = opts.excludeShinkansen ?? false;
 
+  // 出題除外（noQuestion）の乗換グループの駅は出発駅・到着駅にしない
+  areaStations = areaStations.filter((s) => !network.stations[s].noQuestion);
   if (areaStations.length < 2) return null;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -128,7 +101,7 @@ export function generateQuestion(
     const destGroup = network.stations[destination].group;
     if (originGroup === destGroup) continue;
 
-    const result = minTransfersBetweenGroups(network, originGroup, destGroup, excludeShinkansen);
+    const result = minTransfersBetweenGroups(network, originGroup, destGroup);
     if (result === null) continue;
     if (result < minTransfers) continue;
     if (maxTransfers !== undefined && result > maxTransfers) continue;

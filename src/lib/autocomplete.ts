@@ -1,7 +1,10 @@
 /**
  * 駅名・路線名のオートコンプリート候補生成・検索ユーティリティ。
  * UI（入力補完コンポーネント等）から利用される共有ロジックで、Network構造には依存しない。
+ * 日本語名の部分一致に加え、英語表記（ローマ字）との照合に対応する
+ * （「しんじゅく」「シンジュク」「shinjuku」はいずれも 新宿 にヒットする）。
  */
+import { romajiKeyOfInput } from './romaji.ts';
 
 /** オートコンプリート候補1件。 */
 export interface AutocompleteOption {
@@ -19,6 +22,8 @@ export interface AutocompleteOption {
    * filterOptions のマッチ対象には含めない（検索は searchText のみ）。
    */
   note?: string;
+  /** ローマ字照合用の正規化キー（normalizeRomaji 済みの英語表記）。 */
+  romaji?: string;
 }
 
 /**
@@ -59,15 +64,20 @@ export function filterOptions(
     return options.slice(0, maxResults);
   }
 
+  // かな・ローマ字入力はローマ字キーでも照合する（漢字を含む入力は日本語名のみで照合）
+  const romajiQuery = romajiKeyOfInput(query);
+
   const startsWithMatches: AutocompleteOption[] = [];
   const containsMatches: AutocompleteOption[] = [];
 
   for (const opt of options) {
     const normalizedSearchText = normalizeQuery(opt.searchText);
-    if (!normalizedSearchText.includes(normalizedQuery)) {
-      continue;
+    let matchIndex = normalizedSearchText.indexOf(normalizedQuery);
+    if (matchIndex === -1 && romajiQuery !== '' && opt.romaji !== undefined) {
+      matchIndex = opt.romaji.indexOf(romajiQuery);
     }
-    if (normalizedSearchText.startsWith(normalizedQuery)) {
+    if (matchIndex === -1) continue;
+    if (matchIndex === 0) {
       startsWithMatches.push(opt);
     } else {
       containsMatches.push(opt);

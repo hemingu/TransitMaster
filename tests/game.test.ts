@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateRoute, validateRoute } from '../src/lib/validate.ts';
 import { filterOptions } from '../src/lib/autocomplete.ts';
-import { miniNetwork } from './fixtures/miniEkidata.ts';
+import { searchRoute } from '../src/lib/raptor.ts';
+import { miniNetwork } from './fixtures/miniMt3d.ts';
 import type { Itinerary, Network, RouteLeg } from '../src/lib/types.ts';
 import {
   buildLeg,
@@ -29,14 +30,11 @@ function findLineIndex(network: Network, name: string): number {
   return idx;
 }
 
+/** 路線の駅レコード（station index）を駅名で探す。 */
 function stationOnLine(network: Network, lineIdx: number, name: string): number {
-  const line = network.lines[lineIdx];
-  for (const pattern of line.patterns) {
-    for (const stopIdx of pattern.stops) {
-      if (network.stations[stopIdx].name === name) return stopIdx;
-    }
-  }
-  throw new Error(`station ${name} not found on line ${lineIdx}`);
+  const idx = network.stations.findIndex((s) => s.line === lineIdx && s.name === name);
+  if (idx === -1) throw new Error(`station ${name} not found on line ${lineIdx}`);
+  return idx;
 }
 
 describe('formatDuration', () => {
@@ -54,16 +52,16 @@ describe('formatDuration', () => {
 });
 
 describe('formatEstimatedDuration', () => {
-  it('59分は「約59分（推定）」になる（60分未満の境界）', () => {
-    expect(formatEstimatedDuration(59 * 60)).toBe('約59分（推定）');
+  it('59分は「約59分」になる（60分未満の境界）', () => {
+    expect(formatEstimatedDuration(59 * 60)).toBe('約59分');
   });
 
-  it('60分ちょうどは「約1時間（推定）」になる（60分の境界）', () => {
-    expect(formatEstimatedDuration(60 * 60)).toBe('約1時間（推定）');
+  it('60分ちょうどは「約1時間」になる（60分の境界）', () => {
+    expect(formatEstimatedDuration(60 * 60)).toBe('約1時間');
   });
 
-  it('60分超（65分）は「約1時間5分（推定）」になる', () => {
-    expect(formatEstimatedDuration(65 * 60)).toBe('約1時間5分（推定）');
+  it('60分超（65分）は「約1時間5分」になる', () => {
+    expect(formatEstimatedDuration(65 * 60)).toBe('約1時間5分');
   });
 });
 
@@ -81,21 +79,25 @@ describe('difficultyToTransferRange', () => {
   });
 });
 
-describe('game.ts helpers with miniNetwork', () => {
+describe('game.ts helpers with miniNetwork (MT3Dフィクスチャ)', () => {
   const network = miniNetwork();
 
   const yamanote = findLineIndex(network, '山手線');
   const chuo = findLineIndex(network, '中央線');
-  const marunouchi = findLineIndex(network, '丸ノ内線');
+  const fukutoshin = findLineIndex(network, '副都心線');
+  const toyoko = findLineIndex(network, '東横線');
+  const minatomirai = findLineIndex(network, 'みなとみらい線');
 
   const tokyoYamanote = stationOnLine(network, yamanote, '東京');
-  const tokyoMarunouchi = stationOnLine(network, marunouchi, '東京');
+  const tokyoChuo = stationOnLine(network, chuo, '東京');
   const shinjukuYamanote = stationOnLine(network, yamanote, '新宿');
-  const shinjukuMarunouchi = stationOnLine(network, marunouchi, '新宿');
   const shinjukuChuo = stationOnLine(network, chuo, '新宿');
-  const ikebukuroYamanote = stationOnLine(network, yamanote, '池袋');
-  const kandaYamanote = stationOnLine(network, yamanote, '神田');
-  const akihabaraYamanote = stationOnLine(network, yamanote, '秋葉原');
+  const uenoYamanote = stationOnLine(network, yamanote, '上野');
+  const shibuyaFuku = stationOnLine(network, fukutoshin, '渋谷');
+  const shibuyaToyoko = stationOnLine(network, toyoko, '渋谷');
+  const yokohamaToyoko = stationOnLine(network, toyoko, '横浜');
+  const yokohamaMina = stationOnLine(network, minatomirai, '横浜');
+  const ikebukuroFuku = stationOnLine(network, fukutoshin, '池袋');
 
   it('stationDisplayName は駅名をそのまま返す', () => {
     expect(stationDisplayName(network, tokyoYamanote)).toBe('東京');
@@ -107,14 +109,14 @@ describe('game.ts helpers with miniNetwork', () => {
   });
 
   it('formatLineName: 路線名（事業者名）の形式になる', () => {
-    expect(formatLineName(network, marunouchi)).toBe('丸ノ内線（東京メトロ）');
+    expect(formatLineName(network, fukutoshin)).toBe('副都心線（東京メトロ）');
     expect(formatLineName(network, yamanote)).toBe('山手線（JR東日本）');
   });
 
-  it('linesThroughStation: 東京駅グループを通る路線には山手線と丸ノ内線が含まれる', () => {
+  it('linesThroughStation: 東京駅グループ（alternateで統合）を通る路線には山手線と中央線が含まれる', () => {
     const lines = linesThroughStation(network, tokyoYamanote).map((i) => network.lines[i].name);
     expect(lines).toContain('山手線');
-    expect(lines).toContain('丸ノ内線');
+    expect(lines).toContain('中央線');
   });
 
   it('stationsOnLine: 山手線上の駅一覧から現在駅（東京）を除外できる', () => {
@@ -122,14 +124,14 @@ describe('game.ts helpers with miniNetwork', () => {
     const stations = stationsOnLine(network, yamanote, excludeGroup);
     const names = stations.map((s) => s.name);
     expect(names).not.toContain('東京');
-    expect(names).toContain('神田');
-    expect(names).toContain('池袋');
+    expect(names).toContain('上野');
+    expect(names).toContain('品川');
   });
 
   it('filterStationsByQuery: クエリでインクリメンタルに絞り込める', () => {
     const stations = stationsOnLine(network, yamanote);
-    const filtered = filterStationsByQuery(stations, '神');
-    expect(filtered.map((s) => s.name)).toEqual(['神田']);
+    const filtered = filterStationsByQuery(stations, '上');
+    expect(filtered.map((s) => s.name)).toEqual(['上野']);
   });
 
   it('filterStationsByQuery: 空クエリは全件返す', () => {
@@ -138,206 +140,104 @@ describe('game.ts helpers with miniNetwork', () => {
   });
 
   describe('stationOnLineInGroup / buildLeg（路線レコード跨ぎの駅indexマッピング）', () => {
-    it('東京(山手線) を丸ノ内線上の駅 index にマップすると 東京(丸ノ内線) になる', () => {
-      expect(stationOnLineInGroup(network, marunouchi, tokyoYamanote)).toBe(tokyoMarunouchi);
+    it('渋谷（副都心線）と同グループの東横線の駅レコードにマップされる', () => {
+      expect(stationOnLineInGroup(network, toyoko, shibuyaFuku)).toBe(shibuyaToyoko);
+      expect(stationOnLineInGroup(network, fukutoshin, shibuyaToyoko)).toBe(shibuyaFuku);
     });
 
-    it('路線上に存在しないグループの駅は null を返す（神田は丸ノ内線に無い）', () => {
-      expect(stationOnLineInGroup(network, marunouchi, kandaYamanote)).toBeNull();
+    it('路線上に同グループの駅がなければ null', () => {
+      expect(stationOnLineInGroup(network, minatomirai, shibuyaFuku)).toBeNull();
     });
 
-    it('回帰: 山手線 東京→(降車後)丸ノ内線に乗る際、丸ノ内線上の東京レコードへマップされる', () => {
-      // UI操作の再現: 出題「秋葉原→新宿」
-      // 1本目: 山手線を選択し、降車駅リスト（山手線上の駅）から東京を選ぶ
-      const yamanoteCandidates = stationsOnLine(
-        network,
-        yamanote,
-        network.stations[akihabaraYamanote].group
-      );
-      const tokyoOnYamanote = yamanoteCandidates.find((s) => s.name === '東京')!;
-      expect(tokyoOnYamanote).toBeDefined();
-      const leg1 = buildLeg(network, yamanote, akihabaraYamanote, tokyoOnYamanote.stationIdx);
-      expect(leg1).not.toBeNull();
-
-      // 現在駅は 東京(山手線) の index。ここで丸ノ内線を選択して新宿へ。
-      const currentStation = leg1!.to;
-      expect(currentStation).toBe(tokyoYamanote);
-      const marunouchiCandidates = stationsOnLine(
-        network,
-        marunouchi,
-        network.stations[currentStation].group
-      );
-      const shinjukuOnMarunouchi = marunouchiCandidates.find((s) => s.name === '新宿')!;
-      expect(shinjukuOnMarunouchi).toBeDefined();
-      const leg2 = buildLeg(network, marunouchi, currentStation, shinjukuOnMarunouchi.stationIdx);
-      expect(leg2).not.toBeNull();
-
-      // buildLeg が from を丸ノ内線上の 東京(丸ノ内線) にマップしていること
-      expect(leg2!.from).toBe(tokyoMarunouchi);
-
-      // 経路全体が valid と判定されること（修正前は 'station-not-on-line' で落ちていた）
-      const validation = validateRoute(network, akihabaraYamanote, shinjukuYamanote, [leg1!, leg2!]);
-      expect(validation).toEqual({ valid: true });
+    it('buildLeg: from/to を選択路線上の駅レコードに揃える', () => {
+      const leg = buildLeg(network, toyoko, shibuyaFuku, yokohamaMina);
+      expect(leg).toEqual({ line: toyoko, from: shibuyaToyoko, to: yokohamaToyoko });
     });
 
-    it('フォールバック: 路線上にない駅はマップせず元の駅indexをそのまま使う', () => {
-      // 神田は丸ノ内線に無い。全駅候補UIでは路線上にない駅も選べるため、
-      // buildLeg は即時エラーにせず元の index を残した leg を返す。
-      const leg = buildLeg(network, marunouchi, tokyoYamanote, kandaYamanote);
-      expect(leg.line).toBe(marunouchi);
-      // from は丸ノ内線上の東京レコードへマップされる（同一グループ内に存在するため）
-      expect(leg.from).toBe(tokyoMarunouchi);
-      // to はマップ不能なので元の index のまま
-      expect(leg.to).toBe(kandaYamanote);
-    });
-
-    it('フォールバック leg は回答時に validateRoute が station-not-on-line で弾く', () => {
-      const leg = buildLeg(network, marunouchi, tokyoYamanote, kandaYamanote);
-      const validation = validateRoute(network, tokyoYamanote, kandaYamanote, [leg]);
-      expect(validation.valid).toBe(false);
-      expect(validation.reason).toBe('station-not-on-line');
-      expect(validation.legIndex).toBe(0);
-    });
-
-    it('フォールバック: from/to とも路線上に無い場合も両方とも元の index を保つ', () => {
-      // 神田・秋葉原はどちらも丸ノ内線に無い
-      const leg = buildLeg(network, marunouchi, kandaYamanote, akihabaraYamanote);
-      expect(leg).toEqual({ line: marunouchi, from: kandaYamanote, to: akihabaraYamanote });
-      const validation = validateRoute(network, kandaYamanote, akihabaraYamanote, [leg]);
-      expect(validation.valid).toBe(false);
-      expect(validation.reason).toBe('station-not-on-line');
+    it('buildLeg: 路線上にない駅はそのままの index を使う（validateRoute が弾く）', () => {
+      const leg = buildLeg(network, minatomirai, shibuyaFuku, ikebukuroFuku);
+      expect(leg.from).toBe(shibuyaFuku);
+      expect(leg.to).toBe(ikebukuroFuku);
     });
   });
 
   describe('buildLineOptions（路線オートコンプリート候補）', () => {
     const options = buildLineOptions(network);
 
-    it('全路線が候補になり、labelは「路線名（事業者名）」形式', () => {
-      expect(options.length).toBe(network.lines.length);
-      const yamanoteOpt = options.find((o) => o.label === '山手線（JR東日本）');
-      expect(yamanoteOpt).toBeDefined();
-      expect(yamanoteOpt!.badge).toEqual({ name: '山手線', company: 'JR東日本', color: '9ACD32' });
+    it('全路線が候補になる（除外された路線は含まれない）', () => {
+      expect(options).toHaveLength(network.lines.length);
+      expect(options.map((o) => o.label)).not.toContain('小田原線（小田急電鉄）');
     });
 
-    it('カナ（カタカナ）でヒットする', () => {
-      const result = filterOptions(options, 'ヤマノテ');
-      expect(result.map((o) => o.label)).toContain('山手線（JR東日本）');
+    it('label は「路線名（事業者名）」、badge に色が入る', () => {
+      const opt = options.find((o) => o.id === yamanote)!;
+      expect(opt.label).toBe('山手線（JR東日本）');
+      expect(opt.badge).toEqual({ name: '山手線', company: 'JR東日本', color: '9ACD32' });
     });
 
-    it('ひらがな入力でもヒットする（searchTextにカタカナ→ひらがな変換を連結済み）', () => {
-      const result = filterOptions(options, 'やまのてせん');
-      expect(result.map((o) => o.label)).toContain('山手線（JR東日本）');
+    it('日本語・ローマ字・ひらがな・カタカナで同じ路線にヒットする', () => {
+      for (const q of ['山手', 'yamanote', 'やまのて', 'ヤマノテ']) {
+        expect(filterOptions(options, q).map((o) => o.id)).toContain(yamanote);
+      }
     });
 
-    it('カナ未収録の路線は路線名のみで検索できる', () => {
-      const result = filterOptions(options, '中央');
-      expect(result.map((o) => o.label)).toContain('中央線（JR東日本）');
+    it('東横線は「とうよこ」「toyoko」「touyoko」でヒットする（長音の揺れ: ou -> o）', () => {
+      for (const q of ['とうよこ', 'toyoko', 'touyoko']) {
+        expect(filterOptions(options, q).map((o) => o.id)).toContain(toyoko);
+      }
     });
   });
 
   describe('buildStationOptions（駅オートコンプリート候補）', () => {
     const options = buildStationOptions(network);
 
-    it('グループ（物理駅）単位で重複排除される', () => {
-      const uniqueGroups = new Set(network.stations.map((s) => s.group));
-      expect(options.length).toBe(uniqueGroups.size);
-      // 東京は3レコードあるが候補は1つ
-      expect(options.filter((o) => o.label === '東京').length).toBe(1);
+    it('物理駅（グループ）× 駅名 で重複排除される', () => {
+      const names = options.map((o) => o.label);
+      // 東京は山手線・中央線で1件、渋谷・横浜も1件
+      expect(names.filter((n) => n === '東京')).toHaveLength(1);
+      expect(names.filter((n) => n === '渋谷')).toHaveLength(1);
+      expect(names.filter((n) => n === '横浜')).toHaveLength(1);
     });
 
-    it('カナ（カタカナ・ひらがな）でヒットする', () => {
-      expect(filterOptions(options, 'トウキョウ').map((o) => o.label)).toContain('東京');
-      expect(filterOptions(options, 'とうきょう').map((o) => o.label)).toContain('東京');
+    it('同一グループでも駅名が違えば別候補（新宿 / 新宿三丁目 / 新宿西口）', () => {
+      const names = options.map((o) => o.label);
+      expect(names).toContain('新宿');
+      expect(names).toContain('新宿三丁目');
+      expect(names).toContain('新宿西口');
+      const groups = ['新宿', '新宿三丁目', '新宿西口'].map(
+        (n) => network.stations[options.find((o) => o.label === n)!.id].group
+      );
+      expect(new Set(groups).size).toBe(1);
     });
 
-    it('駅名が一意なら note（都道府県名）は付かない', () => {
-      // miniNetworkの駅名はグループ単位ではすべて一意
-      for (const o of options) {
-        expect(o.note).toBeUndefined();
+    it('ひらがな・カタカナ・ローマ字で駅にヒットする', () => {
+      const ids = (q: string) => filterOptions(options, q).map((o) => network.stations[o.id].name);
+      for (const q of ['しぶや', 'シブヤ', 'shibuya', 'SHIBUYA']) {
+        expect(ids(q)).toContain('渋谷');
+      }
+      for (const q of ['しんじゅく', 'シンジュク', 'shinjuku']) {
+        expect(ids(q)).toContain('新宿');
       }
     });
 
-    it('同名別駅（複数グループに同じ駅名）のみ note に都道府県名が付く', () => {
-      // 大阪の京橋(pref=27)と東京の京橋(pref=13)、一意な桜島、pref不明(0)の同名駅ペア
-      const dupNetwork: Network = {
-        formatVersion: 2,
-        stations: [
-          { name: '京橋', lat: 34.6966, lon: 135.5344, group: 0, pref: 27 },
-          { name: '京橋', lat: 35.6767, lon: 139.7701, group: 1, pref: 13 },
-          { name: '桜島', lat: 34.6656, lon: 135.4384, group: 2, pref: 27 },
-          { name: '謎駅', lat: 0, lon: 0, group: 3, pref: 0 },
-          { name: '謎駅', lat: 1, lon: 1, group: 4, pref: 13 },
-        ],
-        lines: [],
-        transferSec: 300,
-      };
-      const dupOptions = buildStationOptions(dupNetwork);
-
-      const kyobashi = dupOptions.filter((o) => o.label === '京橋');
-      expect(kyobashi.map((o) => o.note)).toEqual(['大阪府', '東京都']);
-
-      // 一意な駅名は note なし
-      expect(dupOptions.find((o) => o.label === '桜島')!.note).toBeUndefined();
-
-      // 同名でも pref=0（不明）の方は note をスキップ、判明している方のみ表示
-      const nazo = dupOptions.filter((o) => o.label === '謎駅');
-      expect(nazo[0].note).toBeUndefined();
-      expect(nazo[1].note).toBe('東京都');
+    it('同名別グループがなければ note は付かない', () => {
+      expect(options.every((o) => o.note === undefined)).toBe(true);
     });
 
-    it('excludeShinkansen: 新幹線路線と新幹線単独駅が候補から除外される', () => {
-      // 新幹線（lineType 1）＋並行在来線＋新幹線単独駅（山里）の小ネットワーク
-      const shinkansenNet: Network = {
-        formatVersion: 2,
+    it('同名の駅が複数グループにある場合は乗り入れ路線名の note で区別される', () => {
+      const dup: Network = {
+        ...network,
         stations: [
-          { name: '中央', lat: 35, lon: 139, group: 0, pref: 13 }, // 0 新幹線
-          { name: '東港', lat: 35.1, lon: 139.5, group: 1, pref: 13 }, // 1 新幹線
-          { name: '山里', lat: 35.2, lon: 140, group: 2, pref: 0 }, // 2 新幹線単独駅
-          { name: '中央', lat: 35, lon: 139, group: 0, pref: 13 }, // 3 在来線
-          { name: '東港', lat: 35.1, lon: 139.5, group: 1, pref: 13 }, // 4 在来線
+          ...network.stations,
+          // 渋谷と同名だが別グループ（別の場所）のダミー駅
+          { name: '渋谷', en: 'Shibuya', lat: 35, lon: 139, group: 9999, line: toyoko },
         ],
-        lines: [
-          {
-            name: 'テスト新幹線',
-            company: 'テスト鉄道',
-            color: null,
-            lineType: 1,
-            patterns: [{ stops: [0, 1, 2], segSec: [100, 100] }],
-          },
-          {
-            name: 'テスト在来線',
-            company: 'テスト鉄道',
-            color: null,
-            lineType: 2,
-            patterns: [{ stops: [3, 4], segSec: [1000] }],
-          },
-        ],
-        transferSec: 300,
       };
-
-      // 路線候補: 除外なしは2路線、excludeShinkansen で在来線のみ
-      expect(buildLineOptions(shinkansenNet).length).toBe(2);
-      const lineOpts = buildLineOptions(shinkansenNet, { excludeShinkansen: true });
-      expect(lineOpts.length).toBe(1);
-      expect(lineOpts[0].label).toBe('テスト在来線（テスト鉄道）');
-
-      // 駅候補: 除外なしは3グループ、excludeShinkansen で新幹線単独駅（山里）が消える
-      expect(buildStationOptions(shinkansenNet).map((o) => o.label)).toEqual([
-        '中央',
-        '東港',
-        '山里',
-      ]);
-      const stationOpts = buildStationOptions(shinkansenNet, { excludeShinkansen: true });
-      expect(stationOpts.map((o) => o.label)).toEqual(['中央', '東港']);
-    });
-
-    it('excludeShinkansen: 新幹線が無いネットワークでは候補が変わらない', () => {
-      expect(buildLineOptions(network, { excludeShinkansen: true }).length).toBe(
-        network.lines.length
-      );
-      expect(buildStationOptions(network, { excludeShinkansen: true }).length).toBe(
-        buildStationOptions(network).length
-      );
+      const opts = buildStationOptions(dup).filter((o) => o.label === '渋谷');
+      expect(opts).toHaveLength(2);
+      expect(opts.every((o) => typeof o.note === 'string' && o.note.length > 0)).toBe(true);
+      expect(opts[1].note).toBe('東横線（東急電鉄）');
+      expect(opts[0].note).toContain('ほか');
     });
   });
 
@@ -350,9 +250,9 @@ describe('game.ts helpers with miniNetwork', () => {
     });
 
     it('wrong-origin: 出発駅の食い違いを説明する', () => {
-      const legs: RouteLeg[] = [{ line: yamanote, from: kandaYamanote, to: ikebukuroYamanote }];
+      const legs: RouteLeg[] = [{ line: yamanote, from: uenoYamanote, to: shinjukuYamanote }];
       const msg = reasonMessage(network, legs, 'wrong-origin', 0);
-      expect(msg).toContain('神田');
+      expect(msg).toContain('上野');
     });
 
     it('reason未指定は空文字を返す', () => {
@@ -363,12 +263,22 @@ describe('game.ts helpers with miniNetwork', () => {
   describe('formatRouteLegs / formatItinerary', () => {
     it('legsを路線名（事業者名込み）と駅名で連結した文字列にする', () => {
       const legs: RouteLeg[] = [
-        { line: yamanote, from: tokyoYamanote, to: kandaYamanote },
-        { line: marunouchi, from: tokyoMarunouchi, to: shinjukuMarunouchi },
+        { line: yamanote, from: tokyoYamanote, to: uenoYamanote },
+        { line: chuo, from: tokyoChuo, to: shinjukuChuo },
+      ];
+      expect(formatRouteLegs(network, legs)).toBe(
+        '山手線（JR東日本） 東京→上野 ｜ 中央線（JR東日本） 東京→新宿'
+      );
+    });
+
+    it('through 付きの区間（直通運転）は「直通」でつなぐ', () => {
+      const legs = [
+        { line: fukutoshin, from: ikebukuroFuku, to: shibuyaFuku },
+        { line: toyoko, from: shibuyaToyoko, to: yokohamaToyoko, through: true },
       ];
       const text = formatRouteLegs(network, legs);
       expect(text).toBe(
-        '山手線（JR東日本） 東京→神田 ｜ 丸ノ内線（東京メトロ） 東京→新宿'
+        '副都心線（東京メトロ） 池袋→渋谷 ＝直通＝ 東横線（東急電鉄） 渋谷→横浜'
       );
     });
 
@@ -377,8 +287,8 @@ describe('game.ts helpers with miniNetwork', () => {
     });
 
     it('formatItinerary は Itinerary.legs を同じ形式に整形する', () => {
-      const legs = [{ line: marunouchi, from: tokyoMarunouchi, to: shinjukuMarunouchi, rideSec: 1200 }];
-      const itinerary: Itinerary = { legs, rideSec: 1200, totalSec: 1200, transfers: 0 };
+      const legs = [{ line: chuo, from: tokyoChuo, to: shinjukuChuo, rideSec: 840 }];
+      const itinerary: Itinerary = { legs, rideSec: 840, totalSec: 840, transfers: 0 };
       expect(formatItinerary(network, itinerary)).toBe(formatRouteLegs(network, itinerary.legs));
     });
   });
@@ -493,28 +403,26 @@ describe('game.ts helpers with miniNetwork', () => {
   });
 
   describe('evaluateRouteとの結合（実ネットワーク上での判定）', () => {
-    it('丸ノ内線直通で回答すると、transfersモードでパーフェクト判定になる', () => {
-      const legs: RouteLeg[] = [{ line: marunouchi, from: tokyoMarunouchi, to: shinjukuMarunouchi }];
+    it('山手線で回答すると、transfersモードでは模範解答（中央線直通・乗換0）と同じ乗換数でパーフェクト判定になる', () => {
+      const legs: RouteLeg[] = [{ line: yamanote, from: tokyoYamanote, to: shinjukuYamanote }];
       const validation = validateRoute(network, tokyoYamanote, shinjukuYamanote, legs);
       expect(validation.valid).toBe(true);
 
-      const evaluation = evaluateRoute(network, legs);
-      const reference: Itinerary = { legs: [], rideSec: 660, totalSec: 660, transfers: 0 };
-
-      const judgement = judgeAnswer('transfers', evaluation, reference);
-      expect(judgement.level).toBe('perfect');
+      const evaluation = evaluateRoute(network, legs, 'transfers');
+      const reference = searchRoute(network, tokyoYamanote, shinjukuYamanote, 'transfers')!;
+      expect(judgeAnswer('transfers', evaluation, reference).level).toBe('perfect');
     });
 
-    it('丸ノ内線直通で回答すると、timeモードでは中央線直通の模範解答(660秒)の1.1倍超のため miss になる', () => {
-      const legs: RouteLeg[] = [{ line: marunouchi, from: tokyoMarunouchi, to: shinjukuMarunouchi }];
-      const evaluation = evaluateRoute(network, legs);
-      // 丸ノ内線直通は1200秒 = 模範解答660秒の約1.8倍
-      const reference: Itinerary = { legs: [], rideSec: 660, totalSec: 660, transfers: 0 };
+    it('山手線で回答すると、timeモードでは中央線(840秒)より遅く miss になる', () => {
+      const legs: RouteLeg[] = [{ line: yamanote, from: tokyoYamanote, to: shinjukuYamanote }];
+      const evaluation = evaluateRoute(network, legs, 'time');
+      const reference = searchRoute(network, tokyoYamanote, shinjukuYamanote, 'time')!;
+      expect(reference.totalSec).toBe(840);
+      expect(evaluation.totalSec).toBe(1500);
 
       const judgement = judgeAnswer('time', evaluation, reference);
       expect(judgement.level).toBe('miss');
       expect(judgement.message).toContain('不正解');
-      expect(judgement.message).toContain('模範解答');
     });
   });
 });

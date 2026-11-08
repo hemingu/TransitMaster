@@ -7,7 +7,7 @@
  *
  * モード（time/transfers）を省略した場合は両方のモードで探索して出力する。
  * 駅名は NFKC 正規化した上で完全一致検索する。同名の駅が複数の駅グループに
- * 存在する場合（例: 「大手町」が東京と愛媛の両方にある等）は、どのグループを
+ * 存在する場合（例: 別の場所にある同名の「浅草」等）は、どのグループを
  * 指しているか一意に決まらないため、候補一覧を表示して終了する
  * （どの駅indexを探索起点に使うかはグループ内で任意の1つでよいため、
  * 候補が1グループに絞れた時点でそのグループの先頭駅を使う）。
@@ -96,7 +96,7 @@ function resolveStation(network: Network, label: string, rawName: string): numbe
 
 /** 1つのモードで探索を実行し、結果を出力する。 */
 function runAndPrint(network: Network, from: number, to: number, mode: AnswerMode): void {
-  const modeLabel = mode === 'time' ? '最短時間（推定）' : '最小乗換';
+  const modeLabel = mode === 'time' ? '最短時間' : '最小乗換';
   const timerLabel = `探索時間（${modeLabel}）`;
 
   console.log(`\n--- モード: ${modeLabel} ---`);
@@ -114,10 +114,12 @@ function runAndPrint(network: Network, from: number, to: number, mode: AnswerMod
     const lineName = formatLineName(network, leg.line);
     const fromName = stationDisplayName(network, leg.from);
     const toName = stationDisplayName(network, leg.to);
-    console.log(`  ${lineName} ${fromName}→${toName}`);
+    console.log(`  ${leg.through ? '＝直通＝ ' : ''}${lineName} ${fromName}→${toName}（${Math.round(leg.rideSec / 60)}分）`);
   }
   console.log(`乗換回数: ${itinerary.transfers}`);
-  console.log(`所要時間: ${formatEstimatedDuration(itinerary.totalSec)}`);
+  console.log(
+    `所要時間: ${formatEstimatedDuration(itinerary.totalSec)}（乗車 ${(itinerary.rideSec / 60).toFixed(1)}分 + 乗換 ${itinerary.transfers}回×${network.transferSec / 60}分）`
+  );
 }
 
 function printUsageAndExit(): void {
