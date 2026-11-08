@@ -406,3 +406,8 @@
 .stat-list li {
   padding: 3px 0;
 }
+
+.builder-header {
+  display: flex;
+  justify-content: flex-end;
+}

@@ -191,6 +191,17 @@ function App() {
     setReferenceLoading(false);
   }
 
+  function handleBackToTop() {
+    setQuestion(null);
+    setLegs([]);
+    setCurrentStation(null);
+    setAnswerResult(null);
+    setReference(null);
+    setJudgement(null);
+    setSetupError(null);
+    setScreen('setup');
+  }
+
   function handleNext() {
     startQuestion();
   }
@@ -231,6 +242,7 @@ function App() {
         onUndo={handleUndo}
         onReset={handleReset}
         onSubmit={handleSubmit}
+        onBackToTop={handleBackToTop}
       />
     );
   }

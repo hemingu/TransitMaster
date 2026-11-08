@@ -22,6 +22,7 @@ interface RouteBuilderScreenProps {
   onUndo: () => void;
   onReset: () => void;
   onSubmit: () => void;
+  onBackToTop: () => void;
 }
 
 export function RouteBuilderScreen({
@@ -37,6 +38,7 @@ export function RouteBuilderScreen({
   onUndo,
   onReset,
   onSubmit,
+  onBackToTop,
 }: RouteBuilderScreenProps) {
   const [selectedLine, setSelectedLine] = useState<number | null>(null);
 
@@ -82,6 +84,20 @@ export function RouteBuilderScreen({
         <span>
           通算: {totalCorrect} / {totalAnswered}
         </span>
+      </div>
+
+      <div className="builder-header">
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => {
+            if (window.confirm('プレイ中の問題は破棄されます。トップ画面に戻りますか？')) {
+              onBackToTop();
+            }
+          }}
+        >
+          トップに戻る
+        </button>
       </div>
 
       <div className="question-banner">
