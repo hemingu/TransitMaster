@@ -109,6 +109,7 @@ export function SetupScreen({
       </button>
 
       <p className="credit">
+        データ出典：
         <a href="https://github.com/nagix/mini-tokyo-3d" target="_blank" rel="noopener noreferrer">
           Mini Tokyo 3D (MIT)
         </a>

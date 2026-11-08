@@ -159,7 +159,7 @@ npm run route -- <出発駅名> <到着駅名> [time|transfers]
 
 ## データ出典・クレジット
 
-- [Mini Tokyo 3D (MIT)](https://github.com/nagix/mini-tokyo-3d)
+- データ出典：[Mini Tokyo 3D (MIT)](https://github.com/nagix/mini-tokyo-3d)
 - アプリ内にも同じ表記（リポジトリへのリンク付き）を表示しています。
 - エリア境界（`src/data/areas.json`）は公開オープンデータ（niiyz/JapanCityGeoJson の市区町村ポリゴン、dataofjapan/land の都道府県ポリゴン）を簡略化したものです（`scripts/build-areas.ts`）。
 
