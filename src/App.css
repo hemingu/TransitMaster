@@ -97,6 +97,14 @@
   margin: 8px 0 0;
 }
 
+/* チャレンジモードのルール説明（固定条件をはっきり伝えるため通常の文字色で表示） */
+.challenge-rules {
+  font-size: 14px;
+  color: inherit;
+  padding-left: 1.4em;
+  line-height: 1.7;
+}
+
 /* データ出典のクレジット表記 */
 .credit {
   font-size: 12px;
@@ -410,4 +418,147 @@
 .builder-header {
   display: flex;
   justify-content: flex-end;
+}
+
+/* ---- モード選択（チャレンジ / フリー） ---- */
+.game-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.game-mode-button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  padding: 16px;
+  border-radius: 12px;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.game-mode-button.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg, var(--surface));
+}
+
+.game-mode-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.game-mode-desc {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---- チャレンジ結果 ---- */
+.challenge-summary {
+  text-align: center;
+}
+
+.challenge-difficulty {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.challenge-score {
+  margin: 0 0 6px;
+}
+
+.challenge-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.challenge-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.challenge-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.challenge-row.ok {
+  border-left: 4px solid var(--success);
+}
+
+.challenge-row.ng {
+  border-left: 4px solid var(--danger);
+}
+
+.challenge-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  background: none;
+  border: none;
+  color: var(--text-h);
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.challenge-row-q {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.challenge-row-route {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.challenge-row-verdict {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.challenge-row.ok .challenge-row-verdict {
+  color: var(--success);
+}
+
+.challenge-row.ng .challenge-row-verdict {
+  color: var(--danger);
+}
+
+.challenge-row-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.challenge-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.secondary-button {
+  padding: 14px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-h);
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
 }

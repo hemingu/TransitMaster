@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import './App.css';
 import { LoadingScreen } from './components/LoadingScreen.tsx';
-import { SetupScreen } from './components/SetupScreen.tsx';
+import { ChallengeResultScreen } from './components/ChallengeResultScreen.tsx';
+import { SetupScreen, type GameMode } from './components/SetupScreen.tsx';
 import { RouteBuilderScreen } from './components/RouteBuilderScreen.tsx';
 import { ResultScreen } from './components/ResultScreen.tsx';
 import { useRoutingWorker } from './components/useRoutingWorker.ts';
 import { type AreaId, stationsInArea } from './lib/area.ts';
+import { CHALLENGE_MODE, CHALLENGE_QUESTION_COUNT, challengeReducer } from './lib/challenge.ts';
 import {
   type Difficulty,
   type Judgement,
@@ -17,7 +19,11 @@ import { type StationScale, filterStationsByScale } from './lib/stationScale.ts'
 import { evaluateRoute, validateRoute } from './lib/validate.ts';
 import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from './lib/types.ts';
 
-type Screen = 'loading' | 'setup' | 'building' | 'result';
+type Screen = 'loading' | 'setup' | 'building' | 'result' | 'challengeResult';
+
+/** チャレンジモードの固定条件 */
+const CHALLENGE_AREA: AreaId = 'tokyo23';
+const CHALLENGE_SCALE: StationScale = 'major';
 
 interface QuestionState {
   origin: number;
@@ -42,6 +48,11 @@ function App() {
   const [mode, setMode] = useState<AnswerMode>('time');
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
   const [stationScale, setStationScale] = useState<StationScale>('all');
+  const [gameMode, setGameMode] = useState<GameMode | null>(null);
+  const [challenge, dispatchChallenge] = useReducer(challengeReducer, null);
+  /** 現在のチャレンジの通し番号（0 = チャレンジ中ではない）。非同期の模範解答が古いチャレンジに混ざらないよう照合する */
+  const challengeIdRef = useRef(0);
+  const challengeCounter = useRef(0);
   const [setupError, setSetupError] = useState<string | null>(null);
 
   const [question, setQuestion] = useState<QuestionState | null>(null);
@@ -100,6 +111,47 @@ function App() {
     return counts;
   }, [network]);
 
+  /** チャレンジを開始（または同じ難易度で再開）する。 */
+  function startChallenge() {
+    if (!network) return;
+    const id = ++challengeCounter.current;
+    challengeIdRef.current = id;
+    dispatchChallenge({ type: 'start', id, difficulty });
+    if (!startChallengeQuestion([])) {
+      challengeIdRef.current = 0;
+      dispatchChallenge({ type: 'clear' });
+    }
+  }
+
+  /** チャレンジの次の問題を出題する（同じ出発駅・到着駅の組を重複させない）。作れなければ false。 */
+  function startChallengeQuestion(used: { origin: number; destination: number }[]): boolean {
+    if (!network) return false;
+    const stations = filterStationsByScale(
+      network,
+      stationsInArea(network, CHALLENGE_AREA),
+      CHALLENGE_SCALE
+    );
+    const { minTransfers, maxTransfers } = difficultyToTransferRange(difficulty);
+    const isUsed = (o: number, d: number) =>
+      used.some(
+        (u) => (u.origin === o && u.destination === d) || (u.origin === d && u.destination === o)
+      );
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const q = generateQuestion(network, stations, { minTransfers, maxTransfers });
+      if (!q) break;
+      if (isUsed(q.origin, q.destination)) continue;
+      setSetupError(null);
+      setQuestion({ origin: q.origin, destination: q.destination });
+      setLegs([]);
+      setCurrentStation(q.origin);
+      setScreen('building');
+      return true;
+    }
+    setSetupError('条件に合う出題を作成できませんでした。');
+    setScreen('setup');
+    return false;
+  }
+
   function startQuestion() {
     if (!network) return;
     const areaStations = filterStationsByScale(network, stationsInArea(network, area), stationScale);
@@ -153,7 +205,47 @@ function App() {
     return itinerary;
   }
 
+  /** チャレンジモードの回答: 結果画面を挟まず記録して次の問題へ。模範解答はバックグラウンドで計算する。 */
+  function handleChallengeSubmit() {
+    if (!network || !question || !challenge) return;
+    const id = challengeIdRef.current;
+    const index = challenge.records.length;
+    const validation = validateRoute(network, question.origin, question.destination, legs);
+    dispatchChallenge({
+      type: 'answer',
+      id,
+      record: {
+        origin: question.origin,
+        destination: question.destination,
+        legs,
+        valid: validation.valid,
+        invalidReason: validation.valid ? undefined : validation.reason,
+        invalidLegIndex: validation.valid ? undefined : validation.legIndex,
+        evaluation: validation.valid ? evaluateRoute(network, legs, CHALLENGE_MODE) : null,
+      },
+    });
+    // 待たずに次へ進み、模範解答は届いた時点で記録に反映する（古いチャレンジの結果はリデューサーが無視）
+    void search(question.origin, question.destination, CHALLENGE_MODE).then((itinerary) => {
+      dispatchChallenge({ type: 'reference', id, index, itinerary });
+    });
+
+    const used = [
+      ...challenge.records,
+      { origin: question.origin, destination: question.destination },
+    ];
+    if (used.length >= CHALLENGE_QUESTION_COUNT) {
+      setQuestion(null);
+      setScreen('challengeResult');
+    } else {
+      startChallengeQuestion(used);
+    }
+  }
+
   async function handleSubmit() {
+    if (challenge) {
+      handleChallengeSubmit();
+      return;
+    }
     if (!network || !question) return;
 
     const validation = validateRoute(network, question.origin, question.destination, legs);
@@ -194,6 +286,8 @@ function App() {
   }
 
   function handleBackToTop() {
+    challengeIdRef.current = 0;
+    dispatchChallenge({ type: 'clear' });
     setQuestion(null);
     setLegs([]);
     setCurrentStation(null);
@@ -225,7 +319,10 @@ function App() {
         onDifficultyChange={setDifficulty}
         stationScale={stationScale}
         onStationScaleChange={setStationScale}
+        gameMode={gameMode}
+        onGameModeChange={setGameMode}
         onStart={startQuestion}
+        onStartChallenge={startChallenge}
         errorMessage={setupError}
       />
     );
@@ -246,6 +343,22 @@ function App() {
         onUndo={handleUndo}
         onReset={handleReset}
         onSubmit={handleSubmit}
+        onBackToTop={handleBackToTop}
+        challengeProgress={
+          challenge
+            ? { current: challenge.records.length + 1, total: CHALLENGE_QUESTION_COUNT }
+            : undefined
+        }
+      />
+    );
+  }
+
+  if (screen === 'challengeResult' && challenge) {
+    return (
+      <ChallengeResultScreen
+        network={network}
+        challenge={challenge}
+        onRetry={startChallenge}
         onBackToTop={handleBackToTop}
       />
     );

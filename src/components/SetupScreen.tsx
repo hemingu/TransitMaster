@@ -15,6 +15,8 @@ const ANSWER_MODE_ORDER: AnswerMode[] = ['time', 'transfers'];
 
 const MIN_STATIONS_FOR_AREA = 10;
 
+export type GameMode = 'challenge' | 'free';
+
 interface SetupScreenProps {
   network: Network;
   areaStationCounts: Record<AreaId, number>;
@@ -26,7 +28,10 @@ interface SetupScreenProps {
   onDifficultyChange: (difficulty: Difficulty) => void;
   stationScale: StationScale;
   onStationScaleChange: (scale: StationScale) => void;
+  gameMode: GameMode | null;
+  onGameModeChange: (gameMode: GameMode) => void;
   onStart: () => void;
+  onStartChallenge: () => void;
   errorMessage: string | null;
 }
 
@@ -41,105 +46,173 @@ export function SetupScreen({
   onDifficultyChange,
   stationScale,
   onStationScaleChange,
+  gameMode,
+  onGameModeChange,
   onStart,
+  onStartChallenge,
   errorMessage,
 }: SetupScreenProps) {
   const ridershipAvailable = hasRidershipData(network);
   return (
     <div className="screen setup-screen">
       <h1>人力路線検索マスター</h1>
-      <p className="lead">エリア・模範解答モード・乗換回数・駅の規模を選んでゲームを開始しよう。</p>
+      <p className="lead">遊ぶモードを選んでゲームを開始しよう。</p>
 
       <section className="setup-group">
-        <h2>エリア</h2>
-        <div className="choice-grid">
-          {AREA_ORDER.map((id) => {
-            const count = areaStationCounts[id] ?? 0;
-            const disabled = count < MIN_STATIONS_FOR_AREA;
-            return (
+        <div className="game-mode-grid">
+          <button
+            type="button"
+            className={`game-mode-button${gameMode === 'challenge' ? ' selected' : ''}`}
+            aria-pressed={gameMode === 'challenge'}
+            onClick={() => onGameModeChange('challenge')}
+          >
+            <span className="game-mode-title">チャレンジモード</span>
+            <span className="game-mode-desc">東京23区・主要駅で10問。結果をXでシェア</span>
+          </button>
+          <button
+            type="button"
+            className={`game-mode-button${gameMode === 'free' ? ' selected' : ''}`}
+            aria-pressed={gameMode === 'free'}
+            onClick={() => onGameModeChange('free')}
+          >
+            <span className="game-mode-title">フリーモード</span>
+            <span className="game-mode-desc">エリアや条件を自由に設定して1問ずつ遊ぶ</span>
+          </button>
+        </div>
+      </section>
+
+
+      {gameMode === 'free' && (
+        <>
+        <section className="setup-group">
+          <h2>エリア</h2>
+          <div className="choice-grid">
+            {AREA_ORDER.map((id) => {
+              const count = areaStationCounts[id] ?? 0;
+              const disabled = count < MIN_STATIONS_FOR_AREA;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`choice-button${area === id ? ' selected' : ''}`}
+                  disabled={disabled}
+                  aria-pressed={area === id}
+                  onClick={() => onAreaChange(id)}
+                >
+                  <span>{AREA_LABELS[id]}</span>
+                  {disabled && <span className="choice-note">データ未収録</span>}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="setup-group">
+          <h2>模範解答モード</h2>
+          <div className="choice-grid">
+            {ANSWER_MODE_ORDER.map((id) => (
               <button
                 key={id}
                 type="button"
-                className={`choice-button${area === id ? ' selected' : ''}`}
-                disabled={disabled}
-                aria-pressed={area === id}
-                onClick={() => onAreaChange(id)}
+                className={`choice-button${mode === id ? ' selected' : ''}`}
+                aria-pressed={mode === id}
+                onClick={() => onModeChange(id)}
               >
-                <span>{AREA_LABELS[id]}</span>
-                {disabled && <span className="choice-note">データ未収録</span>}
+                <span>{ANSWER_MODE_LABELS[id]}</span>
               </button>
-            );
-          })}
-        </div>
-      </section>
+            ))}
+          </div>
+          <p className="setup-note">
+            模範解答は乗車券のみで乗れる列車（無料の列車）で計算しています。有料特急・座席指定ライナーは使用しません。
+          </p>
+        </section>
 
-      <section className="setup-group">
-        <h2>模範解答モード</h2>
-        <div className="choice-grid">
-          {ANSWER_MODE_ORDER.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className={`choice-button${mode === id ? ' selected' : ''}`}
-              aria-pressed={mode === id}
-              onClick={() => onModeChange(id)}
-            >
-              <span>{ANSWER_MODE_LABELS[id]}</span>
-            </button>
-          ))}
-        </div>
-        <p className="setup-note">
-          模範解答は乗車券のみで乗れる列車（無料の列車）で計算しています。有料特急・座席指定ライナーは使用しません。
-        </p>
-      </section>
-
-      <section className="setup-group">
-        <h2>乗換回数</h2>
-        <div className="choice-grid">
-          {DIFFICULTY_ORDER.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className={`choice-button${difficulty === id ? ' selected' : ''}`}
-              aria-pressed={difficulty === id}
-              onClick={() => onDifficultyChange(id)}
-            >
-              <span>{DIFFICULTY_LABELS[id]}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="setup-group">
-        <h2>駅の規模（乗降客数）</h2>
-        <div className="choice-grid">
-          {STATION_SCALE_ORDER.map((id) => {
-            const disabled = id !== 'all' && !ridershipAvailable;
-            return (
+        <section className="setup-group">
+          <h2>乗換回数</h2>
+          <div className="choice-grid">
+            {DIFFICULTY_ORDER.map((id) => (
               <button
                 key={id}
                 type="button"
-                className={`choice-button${stationScale === id ? ' selected' : ''}`}
-                disabled={disabled}
-                aria-pressed={stationScale === id}
-                onClick={() => onStationScaleChange(id)}
+                className={`choice-button${difficulty === id ? ' selected' : ''}`}
+                aria-pressed={difficulty === id}
+                onClick={() => onDifficultyChange(id)}
               >
-                <span>{STATION_SCALE_LABELS[id]}</span>
-                {disabled && <span className="choice-note">データ未収録</span>}
+                <span>{DIFFICULTY_LABELS[id]}</span>
               </button>
-            );
-          })}
-        </div>
-        <p className="setup-note">
-          出発駅・到着駅の両方が、選んだエリア内で乗降客数の多い駅（主要駅のみ＝上位20%、中規模駅まで＝上位60%）になります。
-        </p>
-      </section>
+            ))}
+          </div>
+        </section>
 
-      {errorMessage && <p className="error-message">{errorMessage}</p>}
+        <section className="setup-group">
+          <h2>駅の規模（乗降客数）</h2>
+          <div className="choice-grid">
+            {STATION_SCALE_ORDER.map((id) => {
+              const disabled = id !== 'all' && !ridershipAvailable;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`choice-button${stationScale === id ? ' selected' : ''}`}
+                  disabled={disabled}
+                  aria-pressed={stationScale === id}
+                  onClick={() => onStationScaleChange(id)}
+                >
+                  <span>{STATION_SCALE_LABELS[id]}</span>
+                  {disabled && <span className="choice-note">データ未収録</span>}
+                </button>
+              );
+            })}
+          </div>
+          <p className="setup-note">
+            出発駅・到着駅の両方が、選んだエリア内で乗降客数の多い駅（主要駅のみ＝上位20%、中規模駅まで＝上位60%）になります。
+          </p>
+        </section>
 
-      <button type="button" className="primary-button start-button" onClick={onStart}>
-        ゲームを始める
-      </button>
+
+          {errorMessage && <p className="error-message">{errorMessage}</p>}
+
+          <button type="button" className="primary-button start-button" onClick={onStart}>
+            ゲームを始める
+          </button>
+        </>
+      )}
+
+      {gameMode === 'challenge' && (
+        <>
+        <section className="setup-group">
+          <h2>乗換回数</h2>
+          <div className="choice-grid">
+            {DIFFICULTY_ORDER.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={`choice-button${difficulty === id ? ' selected' : ''}`}
+                aria-pressed={difficulty === id}
+                onClick={() => onDifficultyChange(id)}
+              >
+                <span>{DIFFICULTY_LABELS[id]}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+
+          <ul className="setup-note challenge-rules">
+            <li>出発駅と到着駅は東京23区内の駅のみです。</li>
+            <li>最小の乗換回数となるようなルートを解答してください。</li>
+          </ul>
+          <p className="setup-note">
+            模範解答は乗車券のみで乗れる列車（無料の列車）で計算しています。有料特急・座席指定ライナーは使用しません。
+          </p>
+
+          {errorMessage && <p className="error-message">{errorMessage}</p>}
+
+          <button type="button" className="primary-button start-button" onClick={onStartChallenge}>
+            チャレンジを始める
+          </button>
+        </>
+      )}
 
       <p className="credit">
         データ出典：

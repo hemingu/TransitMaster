@@ -23,6 +23,8 @@ interface RouteBuilderScreenProps {
   onReset: () => void;
   onSubmit: () => void;
   onBackToTop: () => void;
+  /** チャレンジモード時の進捗。指定すると連続正解・通算の代わりに「チャレンジ n/m」を表示する。 */
+  challengeProgress?: { current: number; total: number };
 }
 
 export function RouteBuilderScreen({
@@ -39,6 +41,7 @@ export function RouteBuilderScreen({
   onReset,
   onSubmit,
   onBackToTop,
+  challengeProgress,
 }: RouteBuilderScreenProps) {
   const [selectedLine, setSelectedLine] = useState<number | null>(null);
 
@@ -80,10 +83,18 @@ export function RouteBuilderScreen({
   return (
     <div className="screen builder-screen">
       <div className="score-bar">
-        <span>連続正解: {streak}</span>
-        <span>
-          通算: {totalCorrect} / {totalAnswered}
-        </span>
+        {challengeProgress ? (
+          <span>
+            チャレンジ {challengeProgress.current}/{challengeProgress.total}
+          </span>
+        ) : (
+          <>
+            <span>連続正解: {streak}</span>
+            <span>
+              通算: {totalCorrect} / {totalAnswered}
+            </span>
+          </>
+        )}
       </div>
 
       <div className="builder-header">
