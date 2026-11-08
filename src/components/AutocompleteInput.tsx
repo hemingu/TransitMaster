@@ -14,7 +14,7 @@ interface AutocompleteInputProps {
 
 /**
  * テキスト入力＋ドロップダウン候補によるオートコンプリート入力。
- * フォーカスで開き、入力に応じて filterOptions で絞り込む。
+ * 1文字以上（空白のみは不可）入力されて初めて候補を開き、filterOptions で絞り込む。
  * キーボード操作（↑↓・Enter・Esc）とマウス操作の双方に対応する。
  */
 export function AutocompleteInput({
@@ -30,6 +30,9 @@ export function AutocompleteInput({
   const [highlightIndex, setHighlightIndex] = useState(-1);
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 空（空白のみ含む）の間は候補を出さない。
+  const hasQuery = query.trim() !== '';
 
   const results = useMemo(
     () => filterOptions(options, query, maxResults),
@@ -49,7 +52,8 @@ export function AutocompleteInput({
   }
 
   function handleFocus() {
-    setOpen(true);
+    // 空入力ではフォーカスしても開かない（入力があるときのみ開く）。
+    setOpen(hasQuery);
   }
 
   function handleBlur() {
@@ -61,11 +65,13 @@ export function AutocompleteInput({
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
+      if (!hasQuery) return;
       setOpen(true);
       if (results.length === 0) return;
       setHighlightIndex((prev) => (prev + 1) % results.length);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      if (!hasQuery) return;
       setOpen(true);
       if (results.length === 0) return;
       setHighlightIndex((prev) => (prev <= 0 ? results.length - 1 : prev - 1));
@@ -93,7 +99,7 @@ export function AutocompleteInput({
         ref={inputRef}
         type="text"
         role="combobox"
-        aria-expanded={open}
+        aria-expanded={open && hasQuery}
         aria-controls={listId}
         aria-autocomplete="list"
         aria-activedescendant={activeDescendant}
@@ -105,11 +111,12 @@ export function AutocompleteInput({
         onBlur={handleBlur}
         onChange={(e) => {
           setQuery(e.target.value);
-          setOpen(true);
+          // 入力を全部消したら閉じる。
+          setOpen(e.target.value.trim() !== '');
         }}
         onKeyDown={handleKeyDown}
       />
-      {open && (
+      {open && hasQuery && (
         <ul id={listId} role="listbox" className="autocomplete-list">
           {results.length === 0 ? (
             <li className="autocomplete-empty">{emptyMessage}</li>

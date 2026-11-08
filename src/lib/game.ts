@@ -2,6 +2,7 @@ import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from '
 import { getNetworkIndex } from './networkIndex.ts';
 import type { AutocompleteOption } from './autocomplete.ts';
 import { normalizeRomaji } from './romaji.ts';
+import { companySearchTerms } from './companyReadings.ts';
 
 /** difficulty -> generateQuestion の乗換回数レンジ */
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -69,15 +70,19 @@ export function formatLineName(network: Network, lineIdx: number): string {
  * 路線オートコンプリートの候補一覧（全路線）を構築する。
  * label は「路線名（事業者名）」。searchText は日本語名、romaji は英語表記の正規化キー
  * （かな・ローマ字入力でもヒットする）。badge は LineBadge 表示用。
+ * 事業者名検索のため、事業者の略称（searchText）と読み・英字通称（romaji）も検索対象に足す。
+ * romaji は「路線の英語表記|事業者の読み1|事業者の読み2…」の形式で、路線自身の名前が
+ * 先頭に来るため、路線名の前方一致が事業者名のみのヒットより優先される。
  */
 export function buildLineOptions(network: Network): AutocompleteOption[] {
   return network.lines.map((line, lineIdx) => {
     const label = formatLineName(network, lineIdx);
+    const company = companySearchTerms(line.company);
     return {
       id: lineIdx,
       label,
-      searchText: label,
-      romaji: normalizeRomaji(line.en),
+      searchText: company.text ? `${label} ${company.text}` : label,
+      romaji: [normalizeRomaji(line.en), ...company.romaji].join('|'),
       badge: { name: line.name, company: line.company, color: line.color },
     };
   });

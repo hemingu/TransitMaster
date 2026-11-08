@@ -99,14 +99,10 @@ describe('filterOptions', () => {
     expect(result.map((o) => o.id)).toEqual([1, 2, 4, 3, 5]);
   });
 
-  it('queryが空文字なら options 先頭から maxResults 件をそのまま返す', () => {
-    const result = filterOptions(options, '', 3);
-    expect(result.map((o) => o.id)).toEqual([1, 2, 3]);
-  });
-
-  it('queryが空文字かつ options が maxResults 未満ならすべて返す', () => {
-    const result = filterOptions(options, '');
-    expect(result.length).toBe(options.length);
+  it('queryが空文字・空白のみなら候補を返さない', () => {
+    expect(filterOptions(options, '', 3)).toEqual([]);
+    expect(filterOptions(options, '')).toEqual([]);
+    expect(filterOptions(options, '  　')).toEqual([]);
   });
 
   it('全角・半角の表記ゆれを吸収して一致する（NFKC正規化）', () => {

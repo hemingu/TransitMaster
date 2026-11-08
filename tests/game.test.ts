@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateRoute, validateRoute } from '../src/lib/validate.ts';
-import { filterOptions } from '../src/lib/autocomplete.ts';
+import { filterOptions, type AutocompleteOption } from '../src/lib/autocomplete.ts';
+import { COMPANY_READINGS } from '../src/lib/companyReadings.ts';
 import { searchRoute } from '../src/lib/raptor.ts';
 import { miniNetwork } from './fixtures/miniMt3d.ts';
 import type { Itinerary, Network, RouteLeg } from '../src/lib/types.ts';
@@ -185,6 +186,82 @@ describe('game.ts helpers with miniNetwork (MT3Dフィクスチャ)', () => {
       for (const q of ['とうよこ', 'toyoko', 'touyoko']) {
         expect(filterOptions(options, q).map((o) => o.id)).toContain(toyoko);
       }
+    });
+  });
+
+  describe('事業者名検索（路線候補）', () => {
+    const options = buildLineOptions(network);
+    const companyOf = (id: number) => network.lines[id].company;
+    const hit = (q: string) => filterOptions(options, q).map((o) => companyOf(o.id));
+
+    it('空入力・空白のみでは候補が出ない', () => {
+      expect(filterOptions(options, '')).toEqual([]);
+      expect(filterOptions(options, '   ')).toEqual([]);
+    });
+
+    it('東急: とうきゅう・トウキュウ・東急・tokyu で東急電鉄の路線がヒットする', () => {
+      for (const q of ['とうきゅう', 'トウキュウ', '東急', 'tokyu', 'toukyuu']) {
+        expect(hit(q), q).toContain('東急電鉄');
+      }
+    });
+
+    it('東急と東京は区別される（tokyu と tokyo）', () => {
+      expect(hit('とうきゅう')).not.toContain('東京メトロ');
+      expect(hit('とうきょう')).not.toContain('東急電鉄');
+      expect(hit('とうきょうめとろ')).toContain('東京メトロ');
+      expect(hit('とうきょうめとろ')).not.toContain('東急電鉄');
+    });
+
+    it('各事業者の読み・略称・英字でヒットする（fixture に存在する事業者のみ）', () => {
+      const cases: [string, string][] = [
+        ['めとろ', '東京メトロ'],
+        ['メトロ', '東京メトロ'],
+        ['とえい', '都営地下鉄'],
+        ['都営', '都営地下鉄'],
+        ['じぇいあーる', 'JR東日本'],
+        ['JR', 'JR東日本'],
+        ['けいせい', '京成電鉄'],
+        ['けいきゅう', '京急電鉄'],
+        ['京急', '京急電鉄'],
+        ['けいおう', '京王電鉄'],
+        ['せいぶ', '西武鉄道'],
+        ['とうぶ', '東武鉄道'],
+        ['そうてつ', '相模鉄道'],
+        ['相鉄', '相模鉄道'],
+        ['おだきゅう', '小田急電鉄'],
+        ['オダキュウ', '小田急電鉄'],
+        ['小田急', '小田急電鉄'],
+        ['odakyu', '小田急電鉄'],
+      ];
+      for (const [q, company] of cases) {
+        if (network.lines.some((l) => l.company === company)) {
+          expect(hit(q), q).toContain(company);
+        }
+      }
+    });
+
+    it('路線名自体の前方一致は事業者名のみのヒットより前に並ぶ', () => {
+      const list: AutocompleteOption[] = [
+        { id: 1, label: 'A線（東急電鉄）', searchText: 'A線（東急電鉄）', romaji: 'aline|tokyu' },
+        { id: 2, label: 'とうきゅう線', searchText: 'とうきゅう線', romaji: 'tokyuline' },
+      ];
+      expect(filterOptions(list, 'とうきゅう').map((o) => o.id)).toEqual([2, 1]);
+    });
+
+    it('network.json の全事業者が読みテーブルに登録され、実データで事業者の全路線がヒットする', async () => {
+      const { readFileSync } = await import('node:fs');
+      const data = JSON.parse(readFileSync('public/data/network.json', 'utf8')) as Network;
+      const real = buildLineOptions(data);
+      for (const c of new Set(data.lines.map((l) => l.company))) {
+        expect(COMPANY_READINGS[c], c).toBeDefined();
+      }
+      const ids = (q: string) => filterOptions(real, q, 1000).map((o) => data.lines[o.id].company);
+      const odakyu = data.lines.filter((l) => l.company === '小田急電鉄').length;
+      for (const q of ['おだきゅう', 'オダキュウ', '小田急', 'odakyu']) {
+        expect(ids(q).filter((c) => c === '小田急電鉄')).toHaveLength(odakyu);
+      }
+      expect(ids('とうきゅう')).toContain('東急電鉄');
+      expect(ids('とうきゅう')).not.toContain('東京メトロ');
     });
   });
 

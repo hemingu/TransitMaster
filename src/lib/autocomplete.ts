@@ -47,7 +47,7 @@ export function kataToHira(s: string): string {
 /**
  * 候補一覧をクエリで部分一致フィルタする。
  *
- * - query が空文字なら、options の先頭から maxResults 件をそのまま返す。
+ * - query が空（空白のみを含む）なら、候補は出さず空配列を返す。
  * - query が非空なら、normalizeQuery(searchText) が query を含むものだけを残す。
  *   前方一致（normalizeQuery(searchText).startsWith(query)）を優先し、その中では
  *   元の options 配列での出現順を保つ安定ソートとする（前方一致グループ内・部分一致グループ内とも元順序維持）。
@@ -61,7 +61,7 @@ export function filterOptions(
   const normalizedQuery = normalizeQuery(query);
 
   if (normalizedQuery === '') {
-    return options.slice(0, maxResults);
+    return [];
   }
 
   // かな・ローマ字入力はローマ字キーでも照合する（漢字を含む入力は日本語名のみで照合）
