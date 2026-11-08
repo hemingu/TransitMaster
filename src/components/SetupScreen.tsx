@@ -108,7 +108,11 @@ export function SetupScreen({
         ゲームを始める
       </button>
 
-      <p className="credit">データ: Mini Tokyo 3D（公共交通オープンデータセンターのデータを加工）</p>
+      <p className="credit">
+        <a href="https://github.com/nagix/mini-tokyo-3d" target="_blank" rel="noopener noreferrer">
+          Mini Tokyo 3D (MIT)
+        </a>
+      </p>
     </div>
   );
 }

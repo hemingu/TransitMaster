@@ -159,8 +159,8 @@ npm run route -- <出発駅名> <到着駅名> [time|transfers]
 
 ## データ出典・クレジット
 
-- 路線・駅・時刻表のデータは [Mini Tokyo 3D](https://github.com/nagix/mini-tokyo-3d)（MIT License, © Akihiko Kusanagi）のデータを加工して利用しています。このデータは[公共交通オープンデータセンター（ODPT）](https://www.odpt.org/)が提供するデータをもとにしています。
-- アプリ内にも「データ: Mini Tokyo 3D（公共交通オープンデータセンターのデータを加工）」と表記しています。
+- [Mini Tokyo 3D (MIT)](https://github.com/nagix/mini-tokyo-3d)
+- アプリ内にも同じ表記（リポジトリへのリンク付き）を表示しています。
 - エリア境界（`src/data/areas.json`）は公開オープンデータ（niiyz/JapanCityGeoJson の市区町村ポリゴン、dataofjapan/land の都道府県ポリゴン）を簡略化したものです（`scripts/build-areas.ts`）。
 
 ## テスト・ビルドコマンド一覧
