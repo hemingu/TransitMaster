@@ -226,6 +226,31 @@ export function RouteBuilderScreen({
         </div>
       )}
 
+      <details className="through-help">
+        <summary>直通運転の入力方法</summary>
+        <div className="through-help-body">
+          <p>
+            直通運転の列車にそのまま乗り続ける場合は、次のどちらの入力でもOKです。どちらも乗換回数には数えません。
+          </p>
+          <p className="through-help-example">
+            例：永田町 → 三軒茶屋（半蔵門線から東急田園都市線へ直通）
+          </p>
+          <ul className="through-help-list">
+            <li>
+              <span className="through-help-tag">まとめて入力</span>
+              路線「半蔵門線」を選び、降車駅で「田園都市線直通」と添えられた「三軒茶屋」を選ぶ
+            </li>
+            <li>
+              <span className="through-help-tag">分けて入力</span>
+              「半蔵門線」で永田町 → 渋谷、続けて「田園都市線」で渋谷 → 三軒茶屋
+            </li>
+          </ul>
+          <p className="muted">
+            ※ 降車駅の候補に「〇〇線直通」と書かれた駅は、選んだ路線の列車がそのまま乗り入れる駅です。
+          </p>
+        </div>
+      </details>
+
       <button
         type="button"
         className="primary-button submit-button"

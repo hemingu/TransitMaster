@@ -619,3 +619,56 @@
   font-weight: 600;
   cursor: pointer;
 }
+
+/* ---- 直通運転の入力ヘルプ ---- */
+.through-help {
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.through-help summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  color: var(--muted);
+}
+
+.through-help-body {
+  padding: 0 12px 12px;
+  text-align: left;
+}
+
+.through-help-body p {
+  margin: 8px 0;
+}
+
+.through-help-example {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.through-help-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.through-help-list li {
+  padding: 8px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 6px;
+  background: var(--accent-bg);
+}
+
+.through-help-tag {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-h);
+}
