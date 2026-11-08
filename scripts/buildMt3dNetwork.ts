@@ -12,6 +12,7 @@
  */
 import { LINK_SEGMENT } from '../src/lib/types.ts';
 import type { Line, Network, Pattern, Station } from '../src/lib/types.ts';
+import { matchRidership, type S12Station } from './s12Ridership.ts';
 
 // ---------------------------------------------------------------------------
 // 入力（MT3D 形式）
@@ -77,6 +78,8 @@ export interface Mt3dInput {
   stations: Mt3dStation[];
   /** station-groups.json。各要素 = 乗換駅1か所（駅idの配列の配列）。 */
   stationGroups: string[][][];
+  /** 国土数値情報 S12 の解析済み駅別乗降客数（省略可。無ければ ridership なしでビルドする）。 */
+  s12?: S12Station[];
   /** data/transfer-group-overrides.json（乗換グループの手動調整。省略可）。 */
   overrides?: TransferGroupOverrides;
   trainTypes: Mt3dTrainType[];
@@ -775,6 +778,53 @@ export function buildMt3dNetwork(input: Mt3dInput): BuildResult {
   log.push(
     `手動調整: split ${ov?.split?.length ?? 0} 件、merge ${ov?.merge?.length ?? 0} 件、exclude ${ov?.exclude?.length ?? 0} 件（出題除外駅レコード ${stations.filter((x) => x.noQuestion).length} 件）`
   );
+
+  // ---- 乗降客数（S12）の対応付け ----
+  if (input.s12) {
+    const res = matchRidership(
+      stations.map((st) => ({ name: st.name, lon: st.lon, lat: st.lat, company: lines[st.line].company })),
+      input.s12
+    );
+    res.ridership.forEach((r, i) => {
+      if (r !== undefined) stations[i].ridership = r;
+    });
+    const total = new Map<number, number>();
+    const members = new Map<number, number[]>();
+    stations.forEach((st, i) => {
+      const arr = members.get(st.group);
+      if (arr) arr.push(i);
+      else members.set(st.group, [i]);
+      if (st.ridership !== undefined) total.set(st.group, (total.get(st.group) ?? 0) + st.ridership);
+    });
+    const candidates = [...members.keys()].filter((g) => !stations[members.get(g)![0]].noQuestion);
+    const withData = candidates.filter((g) => total.has(g));
+    const groupName = (g: number) => {
+      const ms = members.get(g)!;
+      return [...new Set(ms.map((i) => stations[i].name))].join('/');
+    };
+    log.push(
+      `乗降客数(S12): 有効レコード ${input.s12.length} 件 → 対応付け ${res.matched} 件（重複掲載 ${res.deduped} 件を除外、未対応 ${res.unmatched.length} 件）`
+    );
+    log.push(`  出題候補グループ ${candidates.length} 件中 ${withData.length} 件に乗降客数を付与`);
+    const top = [...withData].sort((a, b) => total.get(b)! - total.get(a)!).slice(0, 30);
+    log.push('  乗降客数 上位30グループ: ' + top.map((g) => `${groupName(g)}(${total.get(g)})`).join('、'));
+    const unmatchedGroups = candidates
+      .filter((g) => !total.has(g))
+      .sort((a, b) => members.get(b)!.length - members.get(a)!.length)
+      .slice(0, 20);
+    log.push('  未対応グループ(駅レコード数順 上位20): ' + unmatchedGroups.map((g) => `${groupName(g)}[${members.get(g)!.length}]`).join('、'));
+    const unmatchedS12 = [...res.unmatched].sort((a, b) => b.ridership - a.ridership);
+    const inRegion = unmatchedS12.filter((r) => {
+      const [x, y] = r.coords[0];
+      return x > 138.8 && x < 140.9 && y > 35.0 && y < 36.3;
+    });
+    log.push(
+      `  MT3D側に対応が無かった関東圏の S12 レコード ${inRegion.length} 件（乗降客数順 上位15）: ` +
+        inRegion.slice(0, 15).map((r) => `${r.name}/${r.company}/${r.line}(${r.ridership})`).join('、')
+    );
+  } else {
+    log.push('乗降客数(S12): 入力なし（ridership なしでビルド）');
+  }
 
   // ---- 9. 出力用パターン ----
   const patterns: Pattern[] = retained.map((p) => ({

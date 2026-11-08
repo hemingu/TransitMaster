@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { buildMt3dNetwork, type Mt3dInput, type Mt3dTrain } from './buildMt3dNetwork.ts';
+import { parseS12 } from './s12Ridership.ts';
 import { miniMt3dInput } from '../tests/fixtures/miniMt3d.ts';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -15,6 +16,17 @@ const OUTPUT_PATH = join(ROOT, 'public', 'data', 'network.json');
 
 function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, 'utf-8')) as T;
+}
+
+const S12_PATH = join(ROOT, 'data', 's12', 'S12-25_NumberOfPassengers.geojson');
+
+/** S12（駅別乗降客数）は任意。無ければ警告して乗降客数なしでビルドする。 */
+function loadS12(): Mt3dInput['s12'] {
+  if (!existsSync(S12_PATH)) {
+    console.warn(`警告: ${S12_PATH} が見つかりません。npm run fetch:s12 で取得してください。乗降客数なしでビルドします（駅の規模の絞り込みは「全駅」のみになります）。`);
+    return undefined;
+  }
+  return parseS12(readJson<unknown>(S12_PATH));
 }
 
 function loadInput(dir: string): Mt3dInput {
@@ -41,6 +53,7 @@ function loadInput(dir: string): Mt3dInput {
     trainTypes: readJson(join(dir, 'train-types.json')),
     overrides: readJson(join(ROOT, 'data', 'transfer-group-overrides.json')),
     trains,
+    s12: loadS12(),
   };
 }
 

@@ -32,3 +32,6 @@ dist-ssr
 # 旧データ源（駅データ.jp CSV・国土数値情報N02。廃止済みで、手元に残っていても無視する）
 /data/ekidata/
 /data/n02/
+
+# 国土数値情報 S12 駅別乗降客数データ（npm run fetch:s12 で取得するローカルデータ）
+/data/s12/

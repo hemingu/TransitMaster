@@ -18,6 +18,9 @@
 
 - 出題: ランダムな2駅間が示されるので、乗換駅と利用路線を答える。
 - エリア: 東京23区内 / 東京都内 / 首都圏（Mini Tokyo 3D収録範囲） の3種類から選択可能。首都圏は収録されている全駅が対象。
+- 難易度は2軸で独立に選べる。
+  - 乗換回数: かんたん（乗換1回）/ ふつう（乗換1〜2回）/ むずかしい（乗換2回以上）。
+  - 駅の規模（乗降客数）: 主要駅のみ / 中規模駅まで / 全駅。出発駅・到着駅の**両方**が条件を満たす。選んだエリア内の出題候補の乗換グループ（出題除外駅は除く）を乗降客数順に並べ、主要駅のみ = 上位20%、中規模駅まで = 上位60%、全駅 = すべて。乗降客数データのない駅は「全駅」でのみ出題される（割合は `src/lib/stationScale.ts` の定数）。
 - 模範解答モード: 以下の2モードで「模範解答」となる経路が変わる。
   - 最短時間
   - 最小乗換回数
@@ -43,11 +46,24 @@ npm install
 
 ### 2. データ取得
 
-本アプリのデータ源は [Mini Tokyo 3D](https://github.com/nagix/mini-tokyo-3d)（MIT License）のデータのみです。固定コミット（`fa7833f`）から必要なファイルをダウンロードします（約105MB、`data/mt3d/` に保存。`.gitignore` 済みでコミットしません）。
+本アプリのデータ源は次の2つです。
+
+- [Mini Tokyo 3D](https://github.com/nagix/mini-tokyo-3d)（MIT License）: 路線・駅・時刻表
+- [国土数値情報 駅別乗降客数データ（S12）](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-S12-2024.html)（国土交通省, CC BY 4.0）: 駅の規模（乗降客数）の絞り込み用。任意（無い場合は乗降客数なしでビルドされ、駅の規模は「全駅」のみ選べる）
+
+Mini Tokyo 3D のデータは固定コミット（`fa7833f`）から必要なファイルをダウンロードします（約105MB、`data/mt3d/` に保存。`.gitignore` 済みでコミットしません）。
 
 ```bash
 npm run fetch:mt3d
 ```
+
+駅別乗降客数データ（約7MBのZIPからGeoJSONのみ展開、`data/s12/` に保存。`.gitignore` 済み）は次のコマンドで取得します。
+
+```bash
+npm run fetch:s12
+```
+
+各駅の乗降客数は最新の有効な年（データ無し・非公開・0の場合は前の年）の値を使い、駅名（表記ゆれを正規化）とホーム線形との距離（500m以内）、可能なら事業者の一致で Mini Tokyo 3D の駅に対応づけます。乗換グループの乗降客数は、対応づけた S12 レコード（重複掲載は1件に数える）の合計です。
 
 取得するのは `railways.json` / `stations.json` / `station-groups.json` / `train-types.json` / `train-timetables/*.json` です。取得済みのファイルはスキップされるため、中断しても再実行で続きから取得できます（GitHub の raw.githubusercontent.com と API を使うだけで、有料サービスは不要です）。
 
@@ -57,7 +73,7 @@ npm run fetch:mt3d
 npm run build:network
 ```
 
-`data/mt3d/` から `public/data/network.json`（Network v3、約0.7MB）を生成します。このファイルは**リポジトリにコミットする運用**です（ビルド時に毎回生成し直すのではなく、手元で生成してコミットし、CIはコミット済みのファイルの存在チェックのみを行います）。
+`data/mt3d/` から `public/data/network.json`（Network v3、約0.7MB。S12 がある場合は各駅の `ridership` を含む）を生成します。このファイルは**リポジトリにコミットする運用**です（ビルド時に毎回生成し直すのではなく、手元で生成してコミットし、CIはコミット済みのファイルの存在チェックのみを行います）。
 
 オプション:
 
@@ -160,6 +176,7 @@ npm run route -- <出発駅名> <到着駅名> [time|transfers]
 ## データ出典・クレジット
 
 - データ出典：[Mini Tokyo 3D (MIT)](https://github.com/nagix/mini-tokyo-3d)
+- 国土数値情報（駅別乗降客数データ）（国土交通省）を加工して作成（[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.ja)、[配布ページ](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-S12-2024.html)）
 - アプリ内にも同じ表記（リポジトリへのリンク付き）を表示しています。
 - エリア境界（`src/data/areas.json`）は公開オープンデータ（niiyz/JapanCityGeoJson の市区町村ポリゴン、dataofjapan/land の都道府県ポリゴン）を簡略化したものです（`scripts/build-areas.ts`）。
 
@@ -174,5 +191,6 @@ npm run route -- <出発駅名> <到着駅名> [time|transfers]
 | `npm test` | Vitest によるユニットテスト実行 |
 | `npm run lint` | Oxlint による静的解析 |
 | `npm run fetch:mt3d` | Mini Tokyo 3D のデータ（固定コミット）を `data/mt3d/` に取得 |
+| `npm run fetch:s12` | 国土数値情報 S12（駅別乗降客数）を `data/s12/` に取得 |
 | `npm run build:network` | `data/mt3d/` から `public/data/network.json` を生成（`-- --src <dir>` / `-- --fixture` 可） |
 | `npm run route -- <出発駅> <到着駅> [time\|transfers]` | 実データでの経路探索結果を手元で確認するCLI |

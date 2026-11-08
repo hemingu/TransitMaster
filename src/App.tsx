@@ -13,6 +13,7 @@ import {
   judgeAnswer,
 } from './lib/game.ts';
 import { generateQuestion } from './lib/question.ts';
+import { type StationScale, filterStationsByScale } from './lib/stationScale.ts';
 import { evaluateRoute, validateRoute } from './lib/validate.ts';
 import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from './lib/types.ts';
 
@@ -40,6 +41,7 @@ function App() {
   const [area, setArea] = useState<AreaId>('tokyo23');
   const [mode, setMode] = useState<AnswerMode>('time');
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
+  const [stationScale, setStationScale] = useState<StationScale>('all');
   const [setupError, setSetupError] = useState<string | null>(null);
 
   const [question, setQuestion] = useState<QuestionState | null>(null);
@@ -100,7 +102,7 @@ function App() {
 
   function startQuestion() {
     if (!network) return;
-    const areaStations = stationsInArea(network, area);
+    const areaStations = filterStationsByScale(network, stationsInArea(network, area), stationScale);
     const { minTransfers, maxTransfers } = difficultyToTransferRange(difficulty);
     const q = generateQuestion(network, areaStations, {
       minTransfers,
@@ -108,7 +110,7 @@ function App() {
     });
     if (!q) {
       setSetupError(
-        '条件に合う出題を作成できませんでした。エリアまたは難易度を変えてお試しください。'
+        '条件に合う出題を作成できませんでした。エリア・乗換回数・駅の規模のいずれかを緩めてお試しください。'
       );
       return;
     }
@@ -221,6 +223,8 @@ function App() {
         onModeChange={setMode}
         difficulty={difficulty}
         onDifficultyChange={setDifficulty}
+        stationScale={stationScale}
+        onStationScaleChange={setStationScale}
         onStart={startQuestion}
         errorMessage={setupError}
       />
