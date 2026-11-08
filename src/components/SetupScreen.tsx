@@ -1,4 +1,5 @@
 import { AREA_LABELS, type AreaId } from '../lib/area.ts';
+import { CHALLENGE_TOP_GROUPS } from '../lib/challenge.ts';
 import { DIFFICULTY_LABELS, type Difficulty } from '../lib/game.ts';
 import { STATION_SCALE_LABELS, type StationScale, hasRidershipData } from '../lib/stationScale.ts';
 import type { AnswerMode, Network } from '../lib/types.ts';
@@ -9,6 +10,12 @@ const ANSWER_MODE_LABELS: Record<AnswerMode, string> = {
 };
 
 const AREA_ORDER: AreaId[] = ['tokyo23', 'tokyo', 'mt3d'];
+const CHALLENGE_DIFFICULTY_LABELS: Record<Difficulty, string> = {
+  easy: `かんたん（主要${CHALLENGE_TOP_GROUPS.easy}駅）`,
+  normal: `ふつう（主要${CHALLENGE_TOP_GROUPS.normal}駅）`,
+  hard: 'むずかしい（23区内の全駅）',
+};
+
 const DIFFICULTY_ORDER: Difficulty[] = ['easy', 'normal', 'hard'];
 const STATION_SCALE_ORDER: StationScale[] = ['major', 'medium', 'all'];
 const ANSWER_MODE_ORDER: AnswerMode[] = ['time', 'transfers'];
@@ -181,7 +188,7 @@ export function SetupScreen({
       {gameMode === 'challenge' && (
         <>
         <section className="setup-group">
-          <h2>乗換回数</h2>
+          <h2>難易度</h2>
           <div className="choice-grid">
             {DIFFICULTY_ORDER.map((id) => (
               <button
@@ -191,7 +198,7 @@ export function SetupScreen({
                 aria-pressed={difficulty === id}
                 onClick={() => onDifficultyChange(id)}
               >
-                <span>{DIFFICULTY_LABELS[id]}</span>
+                <span>{CHALLENGE_DIFFICULTY_LABELS[id]}</span>
               </button>
             ))}
           </div>

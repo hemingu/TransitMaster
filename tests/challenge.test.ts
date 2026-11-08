@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   CHALLENGE_QUESTION_COUNT,
+  CHALLENGE_TOP_GROUPS,
+  CHALLENGE_TRANSFER_RANGE,
+  challengeStations,
   type ChallengeState,
   buildShareIntentUrl,
   buildShareText,
@@ -10,7 +14,10 @@ import {
   difficultyShortLabel,
   isChallengeFinished,
 } from '../src/lib/challenge.ts';
-import type { Itinerary } from '../src/lib/types.ts';
+import { generateQuestion } from '../src/lib/question.ts';
+import { stationsInArea } from '../src/lib/area.ts';
+import type { Difficulty } from '../src/lib/game.ts';
+import type { Itinerary, Network } from '../src/lib/types.ts';
 
 const ref = (transfers: number): Itinerary =>
   ({ legs: [], transfers, totalSec: 600 }) as unknown as Itinerary;
@@ -105,5 +112,45 @@ describe('challengeReducer', () => {
     for (let i = 0; i < CHALLENGE_QUESTION_COUNT; i++) s = reference(s, i, null);
     expect(isChallengeFinished(s)).toBe(true);
     expect(countCorrect(s.records)).toBe(0);
+  });
+});
+
+describe('チャレンジの難易度（出題駅プール）', () => {
+  const network = JSON.parse(
+    readFileSync(new URL('../public/data/network.json', import.meta.url), 'utf8')
+  ) as Network;
+  const levels: Difficulty[] = ['easy', 'normal', 'hard'];
+
+  it('定数と乗換レンジ（1〜2回固定）', () => {
+    expect(CHALLENGE_TOP_GROUPS).toEqual({ easy: 50, normal: 100, hard: null });
+    expect(CHALLENGE_TRANSFER_RANGE).toEqual({ minTransfers: 1, maxTransfers: 2 });
+  });
+
+  it('プールは かんたん ⊂ ふつう ⊂ むずかしい で、グループ数は上位N（同値分のみ超過可）', () => {
+    const sets = levels.map((d) => challengeStations(network, d));
+    const groupSets = sets.map((s) => new Set(s.map((i) => network.stations[i].group)));
+    for (let k = 0; k < 2; k++) {
+      for (const g of groupSets[k]) expect(groupSets[k + 1].has(g)).toBe(true);
+    }
+    expect(groupSets[0].size).toBeGreaterThanOrEqual(50);
+    expect(groupSets[1].size).toBeGreaterThanOrEqual(100);
+    expect(groupSets[0].size).toBeLessThan(groupSets[1].size);
+    expect(groupSets[1].size).toBeLessThan(groupSets[2].size);
+    const area = stationsInArea(network, 'tokyo23').filter((i) => !network.stations[i].noQuestion);
+    expect(sets[2]).toEqual(area);
+    console.log(
+      levels.map((d, k) => `${d}: groups=${groupSets[k].size} records=${sets[k].length}`).join(' / ')
+    );
+  });
+
+  it.each(levels)('%s: 乗換1〜2回の問題を20問生成でき、出発・到着はプール内', (d) => {
+    const pool = challengeStations(network, d);
+    const set = new Set(pool);
+    for (let i = 0; i < 20; i++) {
+      const q = generateQuestion(network, pool, CHALLENGE_TRANSFER_RANGE);
+      expect(q).not.toBeNull();
+      expect(set.has(q!.origin)).toBe(true);
+      expect(set.has(q!.destination)).toBe(true);
+    }
   });
 });

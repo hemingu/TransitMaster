@@ -3,6 +3,7 @@ import { generateQuestion } from '../src/lib/question.ts';
 import {
   STATION_SCALE_TOP_FRACTION,
   filterStationsByScale,
+  filterStationsByTopGroups,
   groupRidership,
   hasRidershipData,
 } from '../src/lib/stationScale.ts';
@@ -98,5 +99,40 @@ describe('駅の規模による出題', () => {
   it('条件を満たす組合せが無ければ null（乗換1回以上は全て0回のため出題不可）', () => {
     const candidates = filterStationsByScale(net, all, 'major');
     expect(generateQuestion(net, candidates, { minTransfers: 1 })).toBeNull();
+  });
+});
+
+describe('filterStationsByTopGroups', () => {
+  const net = scaleNetwork();
+  const all = net.stations.map((_, i) => i);
+  const groups = (n: Network, idxs: number[]) => idxs.map((i) => n.stations[i].group);
+
+  it('上位N件のグループ（noQuestion は母集団外）', () => {
+    expect(groups(net, filterStationsByTopGroups(net, all, 3))).toEqual([0, 1, 2]);
+  });
+
+  it('N がグループ数以上でも、乗降客数 0 のグループは含めない', () => {
+    expect(groups(net, filterStationsByTopGroups(net, all, 100))).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+
+  it('null は noQuestion 以外の全駅（乗降客数なしも含む）', () => {
+    expect(groups(net, filterStationsByTopGroups(net, all, null))).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11]);
+  });
+
+  it('境界の同値グループはすべて残す', () => {
+    const n = scaleNetwork();
+    n.stations[1].ridership = 1000;
+    n.stations[2].ridership = 1000;
+    n.stations[3].ridership = 1000;
+    const a = n.stations.map((_, i) => i);
+    expect(groups(n, filterStationsByTopGroups(n, a, 2))).toEqual([0, 1, 2, 3]);
+  });
+
+  it('同じグループの複数レコードは合計して順位付けし、レコードは全て残る', () => {
+    const n = scaleNetwork();
+    n.stations.push({ name: '駅9別線', en: '', lat: 35, lon: 139, group: 9, line: 0, ridership: 5000 });
+    const a = n.stations.map((_, i) => i);
+    const r = groups(n, filterStationsByTopGroups(n, a, 1));
+    expect(r.sort()).toEqual([9, 9]);
   });
 });

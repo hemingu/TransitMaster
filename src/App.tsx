@@ -7,7 +7,13 @@ import { RouteBuilderScreen } from './components/RouteBuilderScreen.tsx';
 import { ResultScreen } from './components/ResultScreen.tsx';
 import { useRoutingWorker } from './components/useRoutingWorker.ts';
 import { type AreaId, stationsInArea } from './lib/area.ts';
-import { CHALLENGE_MODE, CHALLENGE_QUESTION_COUNT, challengeReducer } from './lib/challenge.ts';
+import {
+  CHALLENGE_MODE,
+  CHALLENGE_QUESTION_COUNT,
+  CHALLENGE_TRANSFER_RANGE,
+  challengeReducer,
+  challengeStations,
+} from './lib/challenge.ts';
 import {
   type Difficulty,
   type Judgement,
@@ -22,8 +28,6 @@ import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from '
 type Screen = 'loading' | 'setup' | 'building' | 'result' | 'challengeResult';
 
 /** チャレンジモードの固定条件 */
-const CHALLENGE_AREA: AreaId = 'tokyo23';
-const CHALLENGE_SCALE: StationScale = 'major';
 
 interface QuestionState {
   origin: number;
@@ -127,12 +131,8 @@ function App() {
   /** チャレンジの次の問題を出題する（同じ出発駅・到着駅の組を重複させない）。作れなければ false。 */
   function startChallengeQuestion(used: { origin: number; destination: number }[]): boolean {
     if (!network) return false;
-    const stations = filterStationsByScale(
-      network,
-      stationsInArea(network, CHALLENGE_AREA),
-      CHALLENGE_SCALE
-    );
-    const { minTransfers, maxTransfers } = difficultyToTransferRange(difficulty);
+    const stations = challengeStations(network, difficulty);
+    const { minTransfers, maxTransfers } = CHALLENGE_TRANSFER_RANGE;
     const isUsed = (o: number, d: number) =>
       used.some(
         (u) => (u.origin === o && u.destination === d) || (u.origin === d && u.destination === o)

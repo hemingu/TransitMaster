@@ -1,11 +1,38 @@
 import { type Difficulty, type JudgementLevel, judgeAnswer } from './game.ts';
-import type { AnswerMode, Itinerary, RouteEvaluation, RouteLeg } from './types.ts';
+import { type AreaId, stationsInArea } from './area.ts';
+import { filterStationsByTopGroups } from './stationScale.ts';
+import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from './types.ts';
 
 /** チャレンジモードの出題数。 */
 export const CHALLENGE_QUESTION_COUNT = 10;
 
-/** チャレンジモードの固定条件（エリアは東京23区内、駅の規模は主要駅のみ）。 */
+/** チャレンジモードの固定条件（エリアは東京23区内、乗換は1〜2回、答え方は最小乗換）。 */
 export const CHALLENGE_MODE: AnswerMode = 'transfers';
+
+/** チャレンジモードの出題エリア。 */
+export const CHALLENGE_AREA: AreaId = 'tokyo23';
+
+/** チャレンジモードの乗換回数レンジ（難易度によらず固定）。 */
+export const CHALLENGE_TRANSFER_RANGE: { minTransfers: number; maxTransfers?: number } = {
+  minTransfers: 1,
+  maxTransfers: 2,
+};
+
+/** 難易度ごとの出題駅プール = 23区内の乗降客数上位N件の乗換グループ（null = 全グループ）。 */
+export const CHALLENGE_TOP_GROUPS: Record<Difficulty, number | null> = {
+  easy: 50,
+  normal: 100,
+  hard: null,
+};
+
+/** チャレンジの難易度に応じた出題候補の駅（index）。 */
+export function challengeStations(network: Network, difficulty: Difficulty): number[] {
+  return filterStationsByTopGroups(
+    network,
+    stationsInArea(network, CHALLENGE_AREA),
+    CHALLENGE_TOP_GROUPS[difficulty]
+  );
+}
 
 /** シェアで案内するサイトURL（本番）。 */
 export const SHARE_URL = 'https://hemingu.github.io/TransitMaster/';
@@ -16,7 +43,7 @@ const DIFFICULTY_SHORT_LABELS: Record<Difficulty, string> = {
   hard: 'むずかしい',
 };
 
-/** 難易度の短い名前（括弧内の乗換回数を除いたもの）。 */
+/** 難易度の短い名前（括弧内の説明を除いたもの）。 */
 export function difficultyShortLabel(difficulty: Difficulty): string {
   return DIFFICULTY_SHORT_LABELS[difficulty];
 }

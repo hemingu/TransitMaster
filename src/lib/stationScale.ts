@@ -65,3 +65,32 @@ export function filterStationsByScale(
   );
   return candidates.filter((s) => selected.has(network.stations[s].group));
 }
+
+/**
+ * エリア内の駅から、乗降客数上位 topN 件の乗換グループに属する出題候補の駅（index）を返す。
+ * - noQuestion の駅は除く（順位付けの母集団にも含めない）。
+ * - 境界（topN 番目）と同数のグループは全て残す。乗降客数 0（データなし）のグループは topN 指定時は残さない。
+ * - topN が null の場合は絞り込まず、noQuestion 以外の全駅を返す。
+ */
+export function filterStationsByTopGroups(
+  network: Network,
+  areaStations: number[],
+  topN: number | null
+): number[] {
+  const candidates = areaStations.filter((s) => !network.stations[s].noQuestion);
+  if (topN === null) return candidates;
+  if (topN <= 0) return [];
+
+  const ridership = groupRidership(network);
+  const groups = [...new Set(candidates.map((s) => network.stations[s].group))];
+  const values = groups.map((g) => ridership.get(g) ?? 0).sort((a, b) => b - a);
+  if (values.length === 0) return [];
+  const cutoff = values[Math.min(topN, values.length) - 1];
+  const selected = new Set(
+    groups.filter((g) => {
+      const v = ridership.get(g) ?? 0;
+      return v > 0 && v >= cutoff;
+    })
+  );
+  return candidates.filter((s) => selected.has(network.stations[s].group));
+}
