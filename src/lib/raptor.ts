@@ -1,5 +1,5 @@
 import { MinHeap } from './heap.ts';
-import { endpointStations, getNetworkIndex, outgoingSegLine } from './networkIndex.ts';
+import { getNetworkIndex, incomingSegLine, outgoingSegLine } from './networkIndex.ts';
 import { LINK_SEGMENT } from './types.ts';
 import type { AnswerMode, Itinerary, ItineraryLeg, Network } from './types.ts';
 
@@ -14,6 +14,7 @@ import type { AnswerMode, Itinerary, ItineraryLeg, Network } from './types.ts';
  * - 乗車ノード (p, pos) -> 駅の属するグループ: 降車（コスト0）
  * - グループ -> そのグループ内の各駅の乗車ノード: 乗換ペナルティ transferSec（＋乗換1回）
  *   （出発グループからの最初の乗車だけは無料）
+ * 出発・到着は乗換グループ単位（グループ内のどの駅レコードから乗って・で降りてもよい）。
  *
  * 同じパターンに乗り続ける限り乗換にならない（路線をまたぐ直通運転も1回の乗車）。
  * 乗り換え = パターンの乗り換え（降りて別のパターンに乗る）。
@@ -23,10 +24,17 @@ import type { AnswerMode, Itinerary, ItineraryLeg, Network } from './types.ts';
  * - 'transfers': 乗換回数を最小化し、同数なら総所要秒が最小の方
  */
 
-/** time モード: 1秒あたりのコスト単位（下位に乗換回数をタイブレークとして載せる）。 */
-const TIME_UNIT = 1000;
-/** transfers モード: 乗換1回あたりのコスト（秒の合計より十分大きい）。 */
-const TRANSFER_UNIT = 1e10;
+/**
+ * コストの桁割り当て（上位から主指標、タイブレーク、駅名タイブレーク）:
+ * - time モード: 秒 * 1e6 + 乗換回数 * 1e3 + 駅名ペナルティ（0〜2）
+ * - transfers モード: 乗換回数 * 1e13 + 秒 * 1e3 + 駅名ペナルティ（0〜2）
+ * 駅名ペナルティは、表示された出発駅名・到着駅名と違う名前のレコードで乗る・降りるごとに +1。
+ * 主指標が同値の経路の中で、表示駅名のレコードで乗降するものを優先するためだけのもの。
+ */
+const TIME_UNIT = 1e6;
+const TIME_TRANSFER = 1e3;
+const TRANSFER_UNIT = 1e13;
+const SEC_UNIT_TRANSFERS = 1e3;
 
 /** 乗車の1区間（同じパターンに乗り続ける連続乗車）。 */
 interface Ride {
@@ -88,11 +96,9 @@ function rideToLegs(network: Network, ride: Ride): ItineraryLeg[] {
 
 /**
  * 出発駅 from から到着駅 to への経路を探索する。
- * from/to はどちらも station index で、端点は「グループ＋駅名」で決まる（endpointStations）:
- * 最初の乗車は from と同じグループ・同じ駅名の駅レコードから、最後の降車は to と同じ
- * グループ・同じ駅名の駅レコードに限る。経路の途中の乗換にはグループ全体を使う
- * （例: 錦糸町→京成金町 で 金町(常磐線) まで行って京成金町へ乗り換えるのは可、
- * 金町(常磐線) で降りて終わりは不可）。
+ * 端点は乗換グループ単位: 最初の乗車は from と同じグループの任意の駅レコードから、最後の降車は
+ * to と同じグループの任意の駅レコードでよい。最適性は両端ともグループ単位で判断し、同コストの経路が
+ * 複数あるときは from/to の表示駅名と同名のレコードで乗降するものを優先する。
  *
  * - 'time': 総所要秒（乗車秒＋乗換×transferSec）が最小の経路
  * - 'transfers': 乗換回数が最小で、同数なら総所要秒が最小の経路
@@ -112,39 +118,33 @@ export function searchRoute(
   const index = getNetworkIndex(network);
   const B = index.nodeCount;
   const groupCount = network.stations.reduce((mx, s) => Math.max(mx, s.group), -1) + 1;
-  // 末尾の1ノードは「到着駅（同グループ・同駅名のレコードで降車）」専用のゴールノード
-  const destNode = B + groupCount;
-  const total = destNode + 1;
-  const destStations = new Set(endpointStations(network, to));
+  const total = B + groupCount;
+  const destNode = B + toGroup;
+  const fromName = network.stations[from].name;
+  const toName = network.stations[to].name;
 
-  const rideUnit = mode === 'time' ? TIME_UNIT : 1;
+  const rideUnit = mode === 'time' ? TIME_UNIT : SEC_UNIT_TRANSFERS;
   const boardCost =
-    mode === 'time' ? network.transferSec * TIME_UNIT + 1 : TRANSFER_UNIT + network.transferSec;
+    mode === 'time'
+      ? network.transferSec * TIME_UNIT + TIME_TRANSFER
+      : TRANSFER_UNIT + network.transferSec * SEC_UNIT_TRANSFERS;
 
   const dist = new Float64Array(total).fill(Number.POSITIVE_INFINITY);
   const parent = new Int32Array(total).fill(-1);
   const heap = new MinHeap();
 
-  // 出発駅と同名の駅レコードから無料で乗車できる
-  for (const s of endpointStations(network, from)) {
+  // 出発グループの任意の駅レコードから無料で乗車できる（表示駅名と違う名前のレコードは僅かにペナルティ）
+  for (const s of index.groupMembers.get(fromGroup) ?? []) {
+    const startCost = network.stations[s].name === fromName ? 0 : 1;
     for (let k = index.stationNodeStart[s]; k < index.stationNodeStart[s + 1]; k++) {
       const node = index.stationNodeList[k];
       // 直通リンクから始まる乗車は、leg の乗車駅がリンクの先の別レコードになってしまうので端点にしない
       if (outgoingSegLine(network, index, node) === LINK_SEGMENT) continue;
-      dist[node] = 0;
-      heap.push(0, node);
+      dist[node] = startCost;
+      heap.push(startCost, node);
     }
   }
 
-  /** node まで乗り続けてきた乗車の乗車ノード（親をたどる）。 */
-  const rideBoardingNode = (node: number): number => {
-    let cur = node;
-    while (parent[cur] !== -1 && parent[cur] < B) cur = parent[cur];
-    return cur;
-  };
-  // 到着駅に着いた乗車の終点ノードと、その1つ手前のノード（経路復元用）
-  let destEnd = -1;
-  let destPrev = -1;
   for (;;) {
     const top = heap.pop();
     if (top === undefined) break;
@@ -169,14 +169,25 @@ export function searchRoute(
       continue;
     }
 
-    // 降車（駅のグループへ）。出発グループへ戻っての乗換は考えない（出発駅の別名レコードへ
-    // 一周して乗り継ぐような経路を作らない。乗らずに降りて同グループの別名レコードへ無料で
-    // 乗り継ぐ抜け道も塞ぐ）。
+    // 降車（駅のグループへ）。出発グループへ戻っての乗換は考えない（出発駅の別レコードへ
+    // 一周して乗り継ぐような経路を作らない）。到着グループへの降車は、実際に乗ってきて着いた
+    // レコード（乗車しただけのノードは不可）で、入ってくる区間が直通リンクでないものに限る
+    // （リンクで着いたレコードは leg の末尾から切り落とされ、コストと leg が食い違うため）。
+    // 到着グループでは到着駅名と違う名前のレコードで降りるとペナルティ。
     const gNode = B + network.stations[index.nodeStation[node]].group;
-    if (gNode !== B + fromGroup && key < dist[gNode]) {
-      dist[gNode] = key;
-      parent[gNode] = node;
-      heap.push(key, gNode);
+    if (gNode !== B + fromGroup) {
+      let c = key;
+      let ok = true;
+      if (gNode === destNode) {
+        const ridden = parent[node] !== -1 && parent[node] < B;
+        ok = ridden && incomingSegLine(network, index, node) !== LINK_SEGMENT;
+        if (network.stations[index.nodeStation[node]].name !== toName) c += 1;
+      }
+      if (ok && c < dist[gNode]) {
+        dist[gNode] = c;
+        parent[gNode] = node;
+        heap.push(c, gNode);
+      }
     }
     // 次の停車駅へ乗り続ける
     const p = index.nodePattern[node];
@@ -189,19 +200,6 @@ export function searchRoute(
     else if (index.isRing[p]) next = start;
     else continue;
     const c = key + pattern.segSec[pos] * rideUnit;
-    // 到着駅（同グループ・同駅名）に「乗ってきて」着いたらゴール。乗車しただけのノードや、
-    // 直通リンクで着いたレコード（leg の末尾から切り落とされる）では降車できない。
-    if (
-      destStations.has(index.nodeStation[next]) &&
-      pattern.segLine[pos] !== LINK_SEGMENT &&
-      c < dist[destNode] &&
-      !(index.isRing[p] && rideBoardingNode(node) === next) // 環状を一周して乗車駅に戻るだけの乗車は除く
-    ) {
-      dist[destNode] = c;
-      destEnd = next;
-      destPrev = node;
-      heap.push(c, destNode);
-    }
     if (c < dist[next]) {
       dist[next] = c;
       parent[next] = node;
@@ -213,8 +211,8 @@ export function searchRoute(
 
   // ---- 経路復元: 到着した乗車の終点から親をたどって乗車(Ride)の列にする ----
   const rides: Ride[] = [];
-  let endNode = destEnd;
-  let cur = destPrev;
+  let endNode = parent[destNode];
+  let cur = endNode;
   for (;;) {
     while (parent[cur] !== -1 && parent[cur] < B) cur = parent[cur];
     rides.push({

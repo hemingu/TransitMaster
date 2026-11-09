@@ -1,5 +1,5 @@
 import { MinHeap } from './heap.ts';
-import { endpointStations, getNetworkIndex, nextNode, outgoingSegLine } from './networkIndex.ts';
+import { getNetworkIndex, nextNode, outgoingSegLine, playerGroupOf } from './networkIndex.ts';
 import { LINK_SEGMENT } from './types.ts';
 import type { AnswerMode, Network, RouteEvaluation, RouteLeg } from './types.ts';
 
@@ -16,12 +16,6 @@ export interface ValidationResult {
   valid: boolean;
   reason?: InvalidReason;
   legIndex?: number;
-}
-
-/** 駅indexの group を取得する（範囲外なら -1 で誰とも一致しない値を返す） */
-function groupOf(network: Network, stationIdx: number): number {
-  const station = network.stations[stationIdx];
-  return station ? station.group : -1;
 }
 
 /**
@@ -135,25 +129,23 @@ export function validateRoute(
     }
   }
 
-  // 端点は「グループ＋駅名」で決まる（endpointStations）。途中の乗換はグループ単位。
-  const originStations = new Set(endpointStations(network, origin));
-  const destinationStations = new Set(endpointStations(network, destination));
-
+  // 出発・到着・途中の乗換はいずれもプレイヤー用の乗換グループ単位（グループ内のどの駅レコードでもよい。
+  // 「使ってもいい」乗換駅（東京⇔大手町など）も同じ乗換駅とみなし、evaluateRoute が通常の乗換として評価する）。
   const firstLeg = legs[0];
-  if (!originStations.has(firstLeg.from)) {
+  if (playerGroupOf(network, firstLeg.from) !== playerGroupOf(network, origin)) {
     return { valid: false, reason: 'wrong-origin', legIndex: 0 };
   }
 
   for (let i = 1; i < legs.length; i++) {
     const prev = legs[i - 1];
     const cur = legs[i];
-    if (groupOf(network, prev.to) !== groupOf(network, cur.from)) {
+    if (playerGroupOf(network, prev.to) !== playerGroupOf(network, cur.from)) {
       return { valid: false, reason: 'bad-transfer', legIndex: i };
     }
   }
 
   const lastLeg = legs[legs.length - 1];
-  if (!destinationStations.has(lastLeg.to)) {
+  if (playerGroupOf(network, lastLeg.to) !== playerGroupOf(network, destination)) {
     return { valid: false, reason: 'wrong-destination', legIndex: legs.length - 1 };
   }
 
@@ -196,21 +188,10 @@ export function evaluateRoute(
   const boardCost =
     mode === 'time' ? network.transferSec * TIME_UNIT + 1 : TRANSFER_UNIT + network.transferSec;
 
-  /**
-   * 駅レコードと同一視するレコード一覧。通常は同じ路線・同じグループのレコード（sameLineRecords）。
-   * 全体の出発・到着の端点（sameNameOnly）は、さらに駅名が同じものに限る
-   * （同じ路線が新宿と新宿西口のように違う名前のレコードを持つとき、選んだ駅名の側だけを端点にする）。
-   */
-  const recordsOf = (station: number, sameNameOnly: boolean): number[] => {
-    const recs = sameLineRecords(network, station);
-    if (!sameNameOnly) return recs;
-    const name = network.stations[station].name;
-    return recs.filter((r) => network.stations[r].name === name);
-  };
   /** 駅レコード（同じ路線・同じグループのレコードを同一視）の乗車ノード一覧。 */
-  const nodesOfClass = (station: number, sameNameOnly = false): number[] => {
+  const nodesOfClass = (station: number): number[] => {
     const out: number[] = [];
-    for (const rec of recordsOf(station, sameNameOnly)) {
+    for (const rec of sameLineRecords(network, station)) {
       for (let k = index.stationNodeStart[rec]; k < index.stationNodeStart[rec + 1]; k++) {
         out.push(index.stationNodeList[k]);
       }
@@ -218,8 +199,8 @@ export function evaluateRoute(
     return out;
   };
   const last = legs.length - 1;
-  const toSets = legs.map((l, k) => new Set(recordsOf(l.to, k === last)));
-  const fromSets = legs.map((l, k) => new Set(recordsOf(l.from, k === 0)));
+  const toSets = legs.map((l) => new Set(sameLineRecords(network, l.to)));
+  const fromSets = legs.map((l) => new Set(sameLineRecords(network, l.from)));
   /** ノードから出る区間の路線（終端なら undefined）。 */
   const outSegLine = (node: number): number | undefined => {
     const p = index.nodePattern[node];
@@ -245,7 +226,7 @@ export function evaluateRoute(
     if (outSegLine(nd) === legs[k].line) relax(k, nd, cost, 1);
   };
 
-  for (const nd of nodesOfClass(legs[0].from, true)) board(0, nd, 0);
+  for (const nd of nodesOfClass(legs[0].from)) board(0, nd, 0);
 
   let best: number | null = null;
 

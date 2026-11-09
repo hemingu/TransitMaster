@@ -22,6 +22,14 @@ export interface Station {
   lon: number;
   /** 同一の物理駅（乗換可能な駅群）を束ねるグループID。異なる路線の乗換駅は同じgroupを共有する。 */
   group: number;
+  /**
+   * 「プレイヤーの解答でだけ」同じ乗換駅として扱ってよい駅のための、プレイヤー用グループID
+   * （data/transfer-group-overrides.json の playerOnlyMerge。例: 東京と大手町）。
+   * group が異なっても playerGroup が同じ駅は、プレイヤーの経路（出発・到着・乗換）では同じ乗換駅とみなす
+   * （乗換扱い: transferSec 加算・乗換+1。直通にはならない）。模範解答・最小乗換回数・出題は group のみを使う。
+   * group と同じ値になる場合は省略（playerGroupOf で取得する）。
+   */
+  playerGroup?: number;
   /** true の乗換グループ（data/transfer-group-overrides.json の exclude）は出題の出発駅・到着駅に使わない（経路途中・オートコンプリートでは使える）。false の場合は省略。 */
   noQuestion?: true;
   /** このレコードが属する路線（line index）。 */

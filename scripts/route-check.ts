@@ -91,7 +91,7 @@ function resolveStation(network: Network, label: string, rawName: string): numbe
     process.exit(1);
   }
 
-  // 端点は「グループ＋入力した駅名」で決まる（searchRoute 側で同名レコードに展開される）ので、
+  // 端点は乗換グループ単位だが、同コストなら表示駅名（入力名）のレコードでの乗降を優先するので、
   // グループの先頭ではなく入力名と一致するレコードを起点にする。
   const idx = network.stations.findIndex(
     (s) => s.group === groups[0] && normalize(s.name) === normalized

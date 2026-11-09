@@ -1,5 +1,5 @@
 import type { AnswerMode, Itinerary, Network, RouteEvaluation, RouteLeg } from './types.ts';
-import { endpointStations, getNetworkIndex } from './networkIndex.ts';
+import { getNetworkIndex, playerGroupOf } from './networkIndex.ts';
 import { evaluateRoute, ridableStationsOnLine } from './validate.ts';
 import type { AutocompleteOption } from './autocomplete.ts';
 import { normalizeRomaji } from './romaji.ts';
@@ -172,9 +172,9 @@ export function markThroughStationOptions(
 
 /** 指定駅（グループ）を通る路線のインデックス一覧を重複なく返す */
 export function linesThroughStation(network: Network, stationIdx: number): number[] {
-  const group = network.stations[stationIdx]?.group;
-  if (group === undefined) return [];
-  const members = getNetworkIndex(network).groupMembers.get(group) ?? [];
+  if (!network.stations[stationIdx]) return [];
+  // 「使ってもいい」乗換駅（東京⇔大手町）の路線も含める（プレイヤー用グループ）
+  const members = getNetworkIndex(network).playerGroupMembers.get(playerGroupOf(network, stationIdx)) ?? [];
   const result: number[] = [];
   for (const m of members) {
     const line = network.stations[m].line;
@@ -227,7 +227,8 @@ export function stationOnLineInGroup(
   const station = network.stations[stationIdx];
   if (!line || !station) return null;
 
-  const members = getNetworkIndex(network).groupMembers.get(station.group) ?? [stationIdx];
+  // プレイヤー用グループ（東京で降りた後に大手町の路線へ乗る、など）で探す
+  const members = getNetworkIndex(network).playerGroupMembers.get(playerGroupOf(network, stationIdx)) ?? [stationIdx];
   let fallback: number | null = null;
   for (const m of members) {
     if (network.stations[m].line !== lineIdx) continue;
@@ -267,7 +268,10 @@ export function buildLeg(
   // 選択路線の駅でなくても、その路線に乗ってそのまま直通先に着く駅（同グループ・同駅名のレコード）なら
   // 直通先の路線上のレコードを使う（例: 半蔵門線 永田町→三軒茶屋）
   const ridable = ridableStationsOnLine(network, lineIdx, from);
-  const throughTo = [toStation, ...endpointStations(network, toStation)].find((s) => ridable.includes(s));
+  const sameNameInGroup = (getNetworkIndex(network).groupMembers.get(network.stations[toStation]?.group) ?? []).filter(
+    (s) => network.stations[s].name === toName
+  );
+  const throughTo = [toStation, ...sameNameInGroup].find((s) => ridable.includes(s));
   return { line: lineIdx, from, to: throughTo ?? toStation };
 }
 
@@ -300,11 +304,11 @@ export function reasonMessage(
       return '経路が組み立てられていません。乗車区間を追加してください。';
     case 'wrong-origin':
       return endpoints
-        ? `最初の乗車駅「${fromName}」が出発駅「${stationDisplayName(network, endpoints.origin)}」と異なります（同じ乗換駅でも駅名が違う駅からは出発できません）。`
+        ? `最初の乗車駅「${fromName}」は出発駅「${stationDisplayName(network, endpoints.origin)}」（と同じ乗換駅）ではありません。`
         : `最初の乗車駅「${fromName}」が出発駅と異なります。`;
     case 'wrong-destination':
       return endpoints
-        ? `最後の降車駅「${toName}」が到着駅「${stationDisplayName(network, endpoints.destination)}」と異なります（同じ乗換駅でも駅名が違う駅では到着になりません）。`
+        ? `最後の降車駅「${toName}」は到着駅「${stationDisplayName(network, endpoints.destination)}」（と同じ乗換駅）ではありません。`
         : `最後の降車駅「${toName}」が到着駅と異なります。`;
     case 'station-not-on-line':
       return `「${fromName}」または「${toName}」は${lineName}の駅ではありません。`;

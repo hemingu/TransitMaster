@@ -27,6 +27,17 @@ export interface TransferGroupOverrides {
   split?: string[][];
   /** 2つのグループ（それぞれ駅名リストで特定）を1つに統合する。 */
   merge?: [string[], string[]][];
+  /**
+   * split と同じ検証で駅名ごとに分割しつつ、分割した部分同士をプレイヤーの解答でだけ同じ乗換駅として扱う
+   * （第1章の「使ってもいい」。模範解答では部分間の乗換を使わず、プレイヤーは使ってよい）。
+   */
+  playerOnlySplit?: string[][];
+  /**
+   * 2つのグループ（それぞれ駅名リストで特定。merge と同じ指定方法）を「プレイヤーの解答でだけ」同じ乗換駅として扱う
+   * （「使ってもいい」乗換駅。例: 東京と大手町）。group は統合せず、Station.playerGroup だけを設定する
+   * ので、模範解答・最小乗換回数・出題には影響しない。該当が0件・複数件ならビルドを失敗させる。
+   */
+  playerOnlyMerge?: [string[], string[]][];
   /** 該当グループ内の全駅を出題の出発駅・到着駅にしない（noQuestion）。 */
   exclude?: string[][];
   /**
@@ -793,12 +804,13 @@ export function buildMt3dNetwork(rawInput: Mt3dInput): BuildResult {
     }
     return [...keys][0];
   };
-  for (const listed of ov?.split ?? []) {
-    const key = findGroup('split', listed);
+  /** 該当グループを駅名ごとに分割し、できた新グループのキー一覧を返す。 */
+  const splitGroup = (kind: string, listed: string[]): number[] => {
+    const key = findGroup(kind, listed);
     const members = groupKey.flatMap((k, ni) => (k === key ? [ni] : []));
     const missing = [...new Set(members.map((ni) => names[ni]))].filter((n) => !listed.includes(n));
     if (missing.length > 0) {
-      throw new Error(`overrides.split [${listed.join(', ')}]: グループ内の駅名 ${missing.join(', ')} が列挙されていません`);
+      throw new Error(`overrides.${kind} [${listed.join(', ')}]: グループ内の駅名 ${missing.join(', ')} が列挙されていません`);
     }
     const newKeyOf = new Map<string, number>();
     for (const ni of members) {
@@ -806,6 +818,14 @@ export function buildMt3dNetwork(rawInput: Mt3dInput): BuildResult {
       if (nk === undefined) newKeyOf.set(names[ni], (nk = nextKey++));
       groupKey[ni] = nk;
     }
+    return [...newKeyOf.values()];
+  };
+  for (const listed of ov?.split ?? []) splitGroup('split', listed);
+  const playerLinks: [number, number][] = []; // プレイヤー専用の結び（グループのキー対）
+  // playerOnlySplit: 模範解答では split と同じく分割し、できた部分同士をプレイヤー専用で結ぶ
+  for (const listed of ov?.playerOnlySplit ?? []) {
+    const parts = splitGroup('playerOnlySplit', listed);
+    for (let k = 1; k < parts.length; k++) playerLinks.push([parts[0], parts[k]]);
   }
   for (const [a, b] of ov?.merge ?? []) {
     const ka = findGroup('merge', a);
@@ -816,6 +836,12 @@ export function buildMt3dNetwork(rawInput: Mt3dInput): BuildResult {
     });
   }
   for (const listed of ov?.exclude ?? []) noQuestion.add(findGroup('exclude', listed));
+  for (const [a, b] of ov?.playerOnlyMerge ?? []) {
+    const ka = findGroup('playerOnlyMerge', a);
+    const kb = findGroup('playerOnlyMerge', b);
+    if (ka === kb) throw new Error(`overrides.playerOnlyMerge [${a.join(', ')}] と [${b.join(', ')}] は既に同じグループです`);
+    playerLinks.push([ka, kb]);
+  }
 
   const groupIdOfRoot = new Map<number, number>();
   const stations: Station[] = stationOld.map((old, ni) => {
@@ -837,6 +863,24 @@ export function buildMt3dNetwork(rawInput: Mt3dInput): BuildResult {
     if (noQuestion.has(root)) st.noQuestion = true;
     return st;
   });
+  if (playerLinks.length > 0) {
+    // グループID上の union-find（代表は最小のグループID）。代表と異なるグループの駅だけ playerGroup を持つ
+    const parent = new Map<number, number>();
+    const find = (x: number): number => {
+      let r = x;
+      while ((parent.get(r) ?? r) !== r) r = parent.get(r)!;
+      return r;
+    };
+    for (const [ka, kb] of playerLinks) {
+      const ra = find(groupIdOfRoot.get(ka)!);
+      const rb = find(groupIdOfRoot.get(kb)!);
+      if (ra !== rb) parent.set(Math.max(ra, rb), Math.min(ra, rb));
+    }
+    for (const st of stations) {
+      const r = find(st.group);
+      if (r !== st.group) st.playerGroup = r;
+    }
+  }
   for (const name of ov?.excludeNames ?? []) {
     const hits = stations.filter((st) => st.name === name);
     if (hits.length === 0) throw new Error(`excludeNames: 駅名「${name}」の駅が見つかりません`);
@@ -846,7 +890,7 @@ export function buildMt3dNetwork(rawInput: Mt3dInput): BuildResult {
     `駅レコード: ${stations.length} 件 / 乗換グループ: ${groupIdOfRoot.size} 件（station-groups ${groupedComplexes} 件、alternate ${alternatePairs} 件、同名近接 ${nearPairs} 件を統合）`
   );
   log.push(
-    `手動調整: split ${ov?.split?.length ?? 0} 件、merge ${ov?.merge?.length ?? 0} 件、exclude ${ov?.exclude?.length ?? 0} 件、excludeNames ${ov?.excludeNames?.length ?? 0} 件（出題除外駅レコード ${stations.filter((x) => x.noQuestion).length} 件）`
+    `手動調整: split ${ov?.split?.length ?? 0} 件、merge ${ov?.merge?.length ?? 0} 件、playerOnlyMerge ${ov?.playerOnlyMerge?.length ?? 0} 件、playerOnlySplit ${ov?.playerOnlySplit?.length ?? 0} 件、exclude ${ov?.exclude?.length ?? 0} 件、excludeNames ${ov?.excludeNames?.length ?? 0} 件（出題除外駅レコード ${stations.filter((x) => x.noQuestion).length} 件）`
   );
 
   // ---- 乗降客数（S12）の対応付け ----

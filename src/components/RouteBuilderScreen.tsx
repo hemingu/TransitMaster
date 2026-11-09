@@ -6,7 +6,7 @@ import {
   markThroughStationOptions,
   stationDisplayName,
 } from '../lib/game.ts';
-import { endpointStations } from '../lib/networkIndex.ts';
+import { playerGroupOf } from '../lib/networkIndex.ts';
 import type { Network, RouteLeg } from '../lib/types.ts';
 import { AutocompleteInput } from './AutocompleteInput.tsx';
 import { LineBadge } from './LineBadge.tsx';
@@ -49,9 +49,9 @@ export function RouteBuilderScreen({
 }: RouteBuilderScreenProps) {
   const [selectedLine, setSelectedLine] = useState<number | null>(null);
 
-  // 到着駅は「同じ乗換グループ・同じ駅名」のレコード（グループ内の別名駅は到着にならない）
+  // 到着駅と同じ乗換グループ（「使ってもいい」乗換駅を含む）の駅に着けば到着（別名の駅でもよい）
   const reachedDestination = useMemo(
-    () => endpointStations(network, destination).includes(currentStation),
+    () => playerGroupOf(network, destination) === playerGroupOf(network, currentStation),
     [network, destination, currentStation]
   );
 

@@ -11,6 +11,8 @@ import type { Network } from './types.ts';
 export interface NetworkIndex {
   /** グループID -> そのグループに属する駅index一覧。 */
   groupMembers: Map<number, number[]>;
+  /** プレイヤー用グループID（playerGroupOf）-> そのグループに属する駅index一覧（プレイヤーの経路の判定・UI用）。 */
+  playerGroupMembers: Map<number, number[]>;
   /** patOffset[p] = パターン p の先頭ノードid。長さ patterns.length + 1。 */
   patOffset: Int32Array;
   /** 総ノード数。 */
@@ -37,20 +39,16 @@ export interface NetworkIndex {
   lineAdjacency: Map<number, number[]>[];
 }
 
-const cache = new WeakMap<Network, NetworkIndex>();
-
 /**
- * 出題の端点（出発駅・到着駅）として扱う駅レコード一覧: 指定駅と「同じ乗換グループ かつ 同じ駅名」の全レコード。
- * 表示される駅名が端点を決める。同名レコードは路線ごとに複数ありうる（例: 新宿）ので、それらはすべて有効な端点。
- * 同じグループでも駅名が違うレコード（例: 金町と京成金町、新宿と新宿西口）は端点に含まれない
- * （経路の途中での乗換にはグループ全体を使う）。指定駅自身を必ず含む。
+ * 駅のプレイヤー用グループID。playerOnlyMerge（「使ってもいい」乗換駅）で結ばれた駅は group が違っても
+ * 同じ値になる。プレイヤーの経路の判定専用で、模範解答・出題は Station.group を使うこと。範囲外の駅は -1。
  */
-export function endpointStations(network: Network, stationIdx: number): number[] {
+export function playerGroupOf(network: Network, stationIdx: number): number {
   const st = network.stations[stationIdx];
-  if (!st) return [];
-  const members = getNetworkIndex(network).groupMembers.get(st.group) ?? [stationIdx];
-  return members.filter((m) => network.stations[m].name === st.name);
+  return st ? (st.playerGroup ?? st.group) : -1;
 }
+
+const cache = new WeakMap<Network, NetworkIndex>();
 
 /** ノードから出る区間の路線（直通リンクなら LINK_SEGMENT、非環状パターンの終端なら undefined）。 */
 export function outgoingSegLine(network: Network, index: NetworkIndex, node: number): number | undefined {
@@ -60,7 +58,7 @@ export function outgoingSegLine(network: Network, index: NetworkIndex, node: num
 /**
  * ノードへ入ってくる区間の路線（直通リンクなら LINK_SEGMENT、非環状パターンの先頭なら undefined）。
  * 到着駅での降車は、入ってくる区間が直通リンクだと leg の末尾が（リンクを切り落として）
- * 手前のレコードになってしまうため、リンクで着いたレコードは端点（降車駅）にできない。
+ * 手前のレコードになってしまうため、リンクで着いたレコードは降車駅にしない（コストと leg の食い違い防止）。
  */
 export function incomingSegLine(network: Network, index: NetworkIndex, node: number): number | undefined {
   const p = index.nodePattern[node];
@@ -93,6 +91,14 @@ export function getNetworkIndex(network: Network): NetworkIndex {
     const arr = groupMembers.get(g);
     if (arr) arr.push(i);
     else groupMembers.set(g, [i]);
+  }
+
+  const playerGroupMembers = new Map<number, number[]>();
+  for (let i = 0; i < n; i++) {
+    const g = playerGroupOf(network, i);
+    const arr = playerGroupMembers.get(g);
+    if (arr) arr.push(i);
+    else playerGroupMembers.set(g, [i]);
   }
 
   // ---- ノード採番 ----
@@ -156,6 +162,7 @@ export function getNetworkIndex(network: Network): NetworkIndex {
 
   const index: NetworkIndex = {
     groupMembers,
+    playerGroupMembers,
     patOffset,
     nodeCount,
     nodePattern,
